@@ -140,6 +140,53 @@ export class LeaderboardService {
 
     const owner = await this.userModel.findById(agent.userId).select('username').lean() as any;
 
+    // Aggregate wins/losses/draws per game type
+    const statsByGameType = await this.matchModel.aggregate([
+      {
+        $match: {
+          $or: [{ 'agents.a.agentId': agent._id }, { 'agents.b.agentId': agent._id }],
+          status: 'completed',
+          agents: { $exists: true },
+        },
+      },
+      {
+        $addFields: {
+          outcome: {
+            $cond: {
+              if: { $eq: ['$result.winnerId', null] },
+              then: 'draw',
+              else: {
+                $cond: {
+                  if: { $eq: [{ $toString: '$result.winnerId' }, id] },
+                  then: 'win',
+                  else: 'loss',
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: '$gameType',
+          wins: { $sum: { $cond: [{ $eq: ['$outcome', 'win'] }, 1, 0] } },
+          losses: { $sum: { $cond: [{ $eq: ['$outcome', 'loss'] }, 1, 0] } },
+          draws: { $sum: { $cond: [{ $eq: ['$outcome', 'draw'] }, 1, 0] } },
+          totalMatches: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const winsByGameType: Record<string, { wins: number; losses: number; draws: number; totalMatches: number }> = {};
+    for (const entry of statsByGameType) {
+      winsByGameType[entry._id] = {
+        wins: entry.wins,
+        losses: entry.losses,
+        draws: entry.draws,
+        totalMatches: entry.totalMatches,
+      };
+    }
+
     return {
       agent: {
         id: agent._id, name: agent.name, eloRating: agent.eloRating,
@@ -150,6 +197,7 @@ export class LeaderboardService {
         createdAt: agent.createdAt,
       },
       recentMatches: matchHistory,
+      statsByGameType: winsByGameType,
     };
   }
 }
