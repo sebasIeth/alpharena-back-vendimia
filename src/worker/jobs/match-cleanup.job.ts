@@ -5,7 +5,7 @@ import { Match, Agent } from '../../database/schemas';
 import { ActiveMatchesService } from '../../orchestrator/active-matches.service';
 import { HumanMoveService } from '../../orchestrator/human-move.service';
 
-const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
+const STALE_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — matches should end naturally via game logic
 
 @Injectable()
 export class MatchCleanupJob {

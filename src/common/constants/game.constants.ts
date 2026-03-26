@@ -1,4 +1,4 @@
-export const MATCH_DURATION_MS = 1_200_000;
+export const MATCH_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — effectively no limit
 export const TURN_TIMEOUT_MS = 80_000;
 export const PULL_AGENT_TURN_TIMEOUT_MS = 80_000;
 export const MAX_TIMEOUTS = 2;
