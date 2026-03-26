@@ -146,6 +146,11 @@ export class AgentsController {
 
     const chain = agent.chain || 'solana';
     const token = dto.token || 'USDC';
+
+    if (token === 'USDC' && dto.amount < 10) {
+      throw new BadRequestException('Minimum USDC withdrawal is 10 USDC.');
+    }
+
     const decimals = this.settlementRouter.getTokenDecimals(chain, token);
     const amountToken = BigInt(Math.round(dto.amount * 10 ** decimals));
     const privKey = decrypt(agent.walletPrivateKey);
