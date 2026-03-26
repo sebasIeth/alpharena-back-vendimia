@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Agent, Match, User } from '../database/schemas';
 
 @Injectable()
@@ -57,7 +57,72 @@ export class LeaderboardService {
 
     scored.sort((a, b) => b.compositeScore - a.compositeScore);
 
-    const ranked = scored.slice(0, limit).map(({ agent, compositeScore }: any, index: number) => ({
+    const topAgents = scored.slice(0, limit);
+    const topAgentIds = topAgents.map(({ agent }: any) => agent._id);
+    const topAgentIdStrs = topAgentIds.map((id: any) => id.toString());
+
+    // Bulk aggregation: stats by game type for all top agents
+    // Unwind each match into per-agent records so both sides get counted
+    const bulkStats = await this.matchModel.aggregate([
+      {
+        $match: {
+          status: 'completed',
+          agents: { $exists: true },
+          $or: [
+            { 'agents.a.agentId': { $in: [...topAgentIds, ...topAgentIdStrs] } },
+            { 'agents.b.agentId': { $in: [...topAgentIds, ...topAgentIdStrs] } },
+          ],
+        },
+      },
+      {
+        $addFields: {
+          _sides: [
+            { agentId: { $toString: '$agents.a.agentId' }, side: 'a' },
+            { agentId: { $toString: '$agents.b.agentId' }, side: 'b' },
+          ],
+        },
+      },
+      { $unwind: '$_sides' },
+      { $match: { '_sides.agentId': { $in: topAgentIdStrs } } },
+      {
+        $addFields: {
+          outcome: {
+            $cond: {
+              if: { $eq: ['$result.winnerId', null] },
+              then: 'draw',
+              else: {
+                $cond: {
+                  if: { $eq: [{ $toString: '$result.winnerId' }, '$_sides.agentId'] },
+                  then: 'win',
+                  else: 'loss',
+                },
+              },
+            },
+          },
+        },
+      },
+      {
+        $group: {
+          _id: { agentId: '$_sides.agentId', gameType: '$gameType' },
+          wins: { $sum: { $cond: [{ $eq: ['$outcome', 'win'] }, 1, 0] } },
+          losses: { $sum: { $cond: [{ $eq: ['$outcome', 'loss'] }, 1, 0] } },
+          draws: { $sum: { $cond: [{ $eq: ['$outcome', 'draw'] }, 1, 0] } },
+          totalMatches: { $sum: 1 },
+        },
+      },
+    ]);
+
+    // Build a map: agentId -> { gameType -> stats }
+    const statsMap = new Map<string, Record<string, { wins: number; losses: number; draws: number; totalMatches: number }>>();
+    for (const entry of bulkStats) {
+      const agentId = entry._id.agentId;
+      if (!statsMap.has(agentId)) statsMap.set(agentId, {});
+      statsMap.get(agentId)![entry._id.gameType] = {
+        wins: entry.wins, losses: entry.losses, draws: entry.draws, totalMatches: entry.totalMatches,
+      };
+    }
+
+    const ranked = topAgents.map(({ agent, compositeScore }: any, index: number) => ({
       rank: index + 1, agentId: agent._id, name: agent.name, eloRating: agent.eloRating,
       stats: agent.stats, gameTypes: agent.gameTypes, userId: agent.userId,
       totalEarnings: agent.stats?.totalEarnings || 0,
@@ -65,6 +130,7 @@ export class LeaderboardService {
       earningsUsdc: agent.stats?.earningsUsdc || 0,
       xUsername: agent.xUsername || null, claimStatus: agent.claimStatus || null,
       score: Math.round(compositeScore * 1000) / 10,
+      statsByGameType: statsMap.get(agent._id.toString()) || {},
     }));
 
     return { leaderboard: ranked };
@@ -141,10 +207,15 @@ export class LeaderboardService {
     const owner = await this.userModel.findById(agent.userId).select('username').lean() as any;
 
     // Aggregate wins/losses/draws per game type
+    // Match on both string and ObjectId variants of agentId
+    const agentOid = new Types.ObjectId(id);
     const statsByGameType = await this.matchModel.aggregate([
       {
         $match: {
-          $or: [{ 'agents.a.agentId': agent._id }, { 'agents.b.agentId': agent._id }],
+          $or: [
+            { 'agents.a.agentId': id }, { 'agents.a.agentId': agentOid },
+            { 'agents.b.agentId': id }, { 'agents.b.agentId': agentOid },
+          ],
           status: 'completed',
           agents: { $exists: true },
         },
