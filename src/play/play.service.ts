@@ -270,6 +270,10 @@ export class PlayService {
       throw new BadRequestException('SOL withdrawals coming soon. Use ALPHA or USDC.');
     }
 
+    if (token === 'USDC' && amount < 10) {
+      throw new BadRequestException('Minimum USDC withdrawal is 10 USDC.');
+    }
+
     const chain = 'solana';
     const balanceStr = await this.settlementRouter.getAgentTokenBalance(chain, user.walletAddress, token);
     const balance = parseFloat(balanceStr);
