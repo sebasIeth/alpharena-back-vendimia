@@ -196,9 +196,9 @@ export class RpsTurnControllerService {
           rpsPhase: 'waiting_moves',
           rpsScores: { ...rpsState.scores },
           legalMoves: ['rock', 'paper', 'scissors'],
-          turnTimeoutMs: 30000,
+          turnTimeoutMs: 70000,
         });
-        response = await this.humanMoveService.waitForMove(matchId + ':' + side, side, agent.agentId, 30000);
+        response = await this.humanMoveService.waitForMove(matchId + ':' + side, side, agent.agentId, 70000);
       } else if (agent.type === 'openclaw') {
         const raw = await this.agentClient.requestChessMoveFromOpenClaw(agent as any, moveRequest as any, { side, agentId: agent.agentId });
         response = raw;
