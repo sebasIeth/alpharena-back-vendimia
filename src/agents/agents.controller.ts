@@ -120,14 +120,14 @@ export class AgentsController {
     if (agent.userId && agent.userId.toString() !== user.userId) throw new ForbiddenException('You do not own this agent');
     if (!agent.walletAddress) throw new BadRequestException('Agent does not have a wallet');
 
-    const chain = agent.chain || 'solana';
-    const [alpha, usdc, sol] = await Promise.all([
+    const chain = agent.chain || 'bnb';
+    const [alpha, usdc, bnb] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA'),
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC'),
       this.settlementRouter.getAgentNativeBalance(chain, agent.walletAddress),
     ]);
 
-    return { walletAddress: agent.walletAddress, alpha, usdc, sol, chain };
+    return { walletAddress: agent.walletAddress, alpha, usdc, bnb, chain };
   }
 
   @Post(':id/withdraw')
@@ -144,7 +144,7 @@ export class AgentsController {
     const destination = dto.toAddress || (await this.userModel.findById(user.userId))?.walletAddress;
     if (!destination) throw new BadRequestException('No destination address provided');
 
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || 'bnb';
     const token = dto.token || 'USDC';
 
     if (token === 'USDC' && dto.amount < 10) {

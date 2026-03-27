@@ -63,8 +63,8 @@ export class ScheduledMatchJob {
         }
 
         // Validate both agents are on the same chain
-        const chainA = (agentA as any).chain || 'base';
-        const chainB = (agentB as any).chain || 'base';
+        const chainA = (agentA as any).chain || 'bnb';
+        const chainB = (agentB as any).chain || 'bnb';
         if (chainA !== chainB) {
           this.logger.warn(`Scheduled match ${id}: chain mismatch (${agentA.name}=${chainA}, ${agentB.name}=${chainB})`);
           await this.scheduledMatchModel.updateOne({ _id: id }, { status: 'cancelled', cancelReason: `Chain mismatch: ${chainA} vs ${chainB}` });

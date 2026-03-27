@@ -25,7 +25,7 @@ export class BettingController {
   /** Public — get betting contract addresses (stub) */
   @Get('contracts')
   getContracts() {
-    return { chain: 'solana', token: 'USDC' };
+    return { chain: 'bnb', token: 'USDC' };
   }
 
   /** Public — get full betting info for a match */

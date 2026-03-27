@@ -10,7 +10,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { CurrentAgent } from '../common/decorators/current-agent.decorator';
 import { AuthPayload } from '../common/types';
 import { X402VerifierService } from './x402-verifier.service';
-import { SolanaSettlementService } from './solana-settlement.service';
+import { SettlementService } from './settlement.service';
 import { X402PaymentStore } from './x402-payment-store.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -23,7 +23,7 @@ export class X402StakeController {
 
   constructor(
     private readonly x402Verifier: X402VerifierService,
-    private readonly solanaSettlement: SolanaSettlementService,
+    private readonly settlement: SettlementService,
     private readonly paymentStore: X402PaymentStore,
     @InjectModel(Agent.name) private readonly agentModel: Model<Agent>,
     private readonly jwtGuard: JwtAuthGuard,
@@ -60,11 +60,11 @@ export class X402StakeController {
       if ((agentAuth as any)._id.toString() !== agentId) throw new BadRequestException('API key does not match this agent');
     }
 
-    const platformWallet = this.solanaSettlement.getPlatformWalletAddress();
-    const usdcMint = this.solanaSettlement.getTokenMint('USDC');
-    const usdcDecimals = this.solanaSettlement.getTokenDecimals('USDC');
+    const platformWallet = this.settlement.getPlatformWalletAddress();
+    const usdcAddress = this.settlement.getTokenAddress('USDC');
+    const usdcDecimals = this.settlement.getTokenDecimals('USDC');
 
-    if (!platformWallet || !usdcMint) {
+    if (!platformWallet || !usdcAddress) {
       throw new BadRequestException('USDC payments not configured on this server');
     }
 
@@ -77,8 +77,8 @@ export class X402StakeController {
         version: '1.0',
         payment: {
           token: 'USDC',
-          tokenMint: usdcMint,
-          network: 'solana',
+          tokenAddress: usdcAddress,
+          network: 'bnb',
           recipient: platformWallet,
           amount: amountAtomic,
           amountHuman: stakeAmount,
@@ -88,7 +88,7 @@ export class X402StakeController {
         instructions: {
           method: 'POST',
           header: 'X-PAYMENT-TX',
-          description: 'Transfer USDC to the recipient address, then resend this request with the tx signature in the X-PAYMENT-TX header',
+          description: 'Transfer USDC on Base to the recipient address, then resend this request with the tx hash in the X-PAYMENT-TX header',
         },
       });
     }

@@ -50,7 +50,7 @@ export class PlayService {
 
     // Auto-calculate stake: $1 USD equivalent
     const matchToken = token || 'USDC';
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || 'bnb';
     let stakeAmount = stakeAmountInput ?? 1;
     if (matchToken === 'ALPHA') {
       const alphaPrice = await this.settlementRouter.getAlphaPriceUsd();
@@ -187,8 +187,8 @@ export class PlayService {
       throw new NotFoundException('User wallet not found');
     }
 
-    const chain = 'solana';
-    const [alpha, usdc, sol] = await Promise.all([
+    const chain = 'bnb';
+    const [alpha, usdc, bnb] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, user.walletAddress, 'ALPHA'),
       this.settlementRouter.getAgentTokenBalance(chain, user.walletAddress, 'USDC'),
       this.settlementRouter.getAgentNativeBalance(chain, user.walletAddress),
@@ -198,7 +198,7 @@ export class PlayService {
       walletAddress: user.walletAddress,
       alpha,
       usdc,
-      sol,
+      bnb,
     };
   }
 
@@ -252,7 +252,7 @@ export class PlayService {
       stats: { wins: 0, losses: 0, draws: 0, totalMatches: 0, winRate: 0, totalEarnings: 0 },
       walletAddress: user.walletAddress,
       walletPrivateKey: user.walletPrivateKey,
-      chain: 'solana',
+      chain: 'bnb',
     });
 
     this.logger.log(`Created human agent "${user.username}" for user ${userId}`);
@@ -274,7 +274,7 @@ export class PlayService {
       throw new BadRequestException('Minimum USDC withdrawal is 10 USDC.');
     }
 
-    const chain = 'solana';
+    const chain = 'bnb';
     const balanceStr = await this.settlementRouter.getAgentTokenBalance(chain, user.walletAddress, token);
     const balance = parseFloat(balanceStr);
     if (balance < amount) {

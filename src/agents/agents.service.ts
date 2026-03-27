@@ -8,8 +8,7 @@ import { DEFAULT_ELO } from '../common/constants/game.constants';
 import { OpenClawWsService } from '../openclaw-ws';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
-import { Keypair } from '@solana/web3.js';
-import * as bs58 from 'bs58';
+import { ethers } from 'ethers';
 
 @Injectable()
 export class AgentsService {
@@ -56,20 +55,20 @@ export class AgentsService {
       agentData.openclawToken = dto.openclawToken;
       agentData.openclawAgentId = dto.openclawAgentId || 'main';
 
-      // Generate a dedicated Solana wallet for this agent
-      const keypair = Keypair.generate();
-      agentData.walletAddress = keypair.publicKey.toBase58();
-      agentData.walletPrivateKey = bs58.default.encode(keypair.secretKey);
+      // Generate a dedicated Base (EVM) wallet for this agent
+      const wallet = ethers.Wallet.createRandom();
+      agentData.walletAddress = wallet.address;
+      agentData.walletPrivateKey = wallet.privateKey;
     } else {
       agentData.endpointUrl = dto.endpointUrl;
 
-      // Generate a dedicated Solana wallet for this agent
-      const keypair = Keypair.generate();
-      agentData.walletAddress = keypair.publicKey.toBase58();
-      agentData.walletPrivateKey = bs58.default.encode(keypair.secretKey);
+      // Generate a dedicated Base (EVM) wallet for this agent
+      const wallet = ethers.Wallet.createRandom();
+      agentData.walletAddress = wallet.address;
+      agentData.walletPrivateKey = wallet.privateKey;
     }
 
-    agentData.chain = dto.chain || 'solana';
+    agentData.chain = dto.chain || 'bnb';
 
     const agent = await this.agentModel.create(agentData);
 
@@ -77,9 +76,7 @@ export class AgentsService {
 
     // Create token accounts in background if agent has its own wallet
     if (agentType !== 'human' && agentData.walletAddress) {
-      this.settlementRouter.ensureTokenAccounts(agentData.chain as string || 'solana', agentData.walletAddress as string).catch((err) =>
-        this.logger.warn(`Failed to create ATAs for agent ${dto.name}: ${err.message}`),
-      );
+      this.settlementRouter.ensureTokenAccounts(agentData.chain as string || 'bnb', agentData.walletAddress as string).catch(() => {});
     }
 
     return { agent };

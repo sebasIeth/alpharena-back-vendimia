@@ -2,9 +2,7 @@ import { Injectable, Logger, BadRequestException, NotFoundException, ConflictExc
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { randomBytes, createHash, randomUUID } from 'crypto';
-import { Keypair } from '@solana/web3.js';
-import * as bs58Module from 'bs58';
-const bs58Encode = (bs58Module as any).default?.encode ?? (bs58Module as any).encode;
+import { ethers } from 'ethers';
 import { Agent, Match } from '../database/schemas';
 import { ActiveMatchesService } from '../orchestrator/active-matches.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
@@ -38,11 +36,11 @@ export class AgentApiService {
     const prefix = rawKey.substring(0, 11); // "ak_" + 8 hex chars
     const claimToken = randomUUID();
 
-    // Generate a dedicated Solana wallet for this agent
+    // Generate a dedicated Base (EVM) wallet for this agent
     const { encrypt } = require('../common/crypto.util');
-    const keypair = Keypair.generate();
-    const walletAddress = keypair.publicKey.toBase58();
-    const walletPrivateKey = encrypt(bs58Encode(keypair.secretKey));
+    const wallet = ethers.Wallet.createRandom();
+    const walletAddress = wallet.address;
+    const walletPrivateKey = encrypt(wallet.privateKey);
 
     const agent = await this.agentModel.create({
       userId: dto.userId ?? null as any,
@@ -51,7 +49,7 @@ export class AgentApiService {
       gameTypes: dto.gameTypes || [],
       walletAddress: dto.walletAddress ?? walletAddress,
       walletPrivateKey,
-      chain: 'solana',
+      chain: 'bnb',
       apiKeyHash: hash,
       apiKeyPrefix: prefix,
       claimToken,
@@ -64,9 +62,7 @@ export class AgentApiService {
     this.logger.log(`Registered pull agent "${dto.name}" (id=${agent._id}, prefix=${prefix})`);
 
     // Create token accounts in background
-    this.settlementRouter.ensureTokenAccounts('solana', agent.walletAddress).catch((err) =>
-      this.logger.warn(`Failed to create ATAs for agent ${dto.name}: ${err.message}`),
-    );
+    this.settlementRouter.ensureTokenAccounts('bnb', agent.walletAddress).catch(() => {});
 
     return {
       agentId: agent._id.toString(),
@@ -136,7 +132,7 @@ export class AgentApiService {
     }
 
     // Verify agent wallet has some balance
-    const chain = (agent as any).chain || 'solana';
+    const chain = (agent as any).chain || 'bnb';
     const [alphaBalance, usdcBalance, solBalance] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA').catch(() => '0'),
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC').catch(() => '0'),

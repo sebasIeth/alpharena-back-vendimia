@@ -111,8 +111,8 @@ export class MatchManagerService {
     }
 
     // Validate all agents are on the same chain
-    const matchChain = agents[0].chain || 'base';
-    const mismatch = agents.find((a) => (a.chain || 'base') !== matchChain);
+    const matchChain = agents[0].chain || 'bnb';
+    const mismatch = agents.find((a) => (a.chain || 'bnb') !== matchChain);
     if (mismatch) {
       throw new Error(
         `Chain mismatch: agent "${mismatch.name}" is on "${mismatch.chain}" but match is on "${matchChain}"`,
@@ -163,7 +163,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType,
-      chain: agentA.chain || 'solana',
+      chain: agentA.chain || 'bnb',
       token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
@@ -230,7 +230,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'marrakech',
-      chain: agentA.chain || 'solana',
+      chain: agentA.chain || 'bnb',
       token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
@@ -300,7 +300,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'chess',
-      chain: agentA.chain || 'solana',
+      chain: agentA.chain || 'bnb',
       token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
@@ -367,7 +367,7 @@ export class MatchManagerService {
   ): Promise<string> {
     const rpsState = createRpsInitialState();
     const matchData = {
-      gameType: 'rps', chain: agentA.chain || 'solana', token: agentA.token || 'USDC',
+      gameType: 'rps', chain: agentA.chain || 'bnb', token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
         b: { agentId: agentB.agentId, userId: agentB.userId, name: agentB.name, eloAtStart: agentB.eloRating },
@@ -446,7 +446,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'poker',
-      chain: agents[0].chain || 'solana',
+      chain: agents[0].chain || 'bnb',
       token: agents[0].token || 'USDC',
       agents: matchAgents,
       stakeAmount, potAmount, status: 'starting',
@@ -556,7 +556,7 @@ export class MatchManagerService {
 
     // Transfer stake from each agent wallet to platform, then escrow
     // Skip on-chain settlement for zero-stake matches
-    const matchChain = matchDoc.chain || 'solana';
+    const matchChain = matchDoc.chain || 'bnb';
     const matchToken = matchDoc.token || 'USDC';
     if (matchDoc.stakeAmount > 0) {
       const tokenDecimals = this.settlementRouter.getTokenDecimals(matchChain, matchToken);
@@ -601,7 +601,7 @@ export class MatchManagerService {
           }
         }
 
-        // Escrow via smart contract (EVM) or implicit (Solana — transfers already done)
+        // Escrow is implicit on Base — agent transfers to platform wallet already done
         const walletA = agentDocsBySide['a']!.walletAddress;
         const walletB = agentDocsBySide['b']!.walletAddress;
         const escrowTxHash = await this.settlementRouter.escrow(
@@ -1074,7 +1074,7 @@ export class MatchManagerService {
       await this.matchModel.updateOne({ _id: matchId }, { status: 'error', endedAt: new Date() });
       const erroredMatch = await this.matchModel.findById(matchId).lean();
       if (erroredMatch?.txHashes?.escrow) {
-        try { await this.settlementRouter.refund('solana', matchId); } catch {}
+        try { await this.settlementRouter.refund('bnb', matchId); } catch {}
       }
       if (matchState) {
         await Promise.all(
@@ -1108,7 +1108,7 @@ export class MatchManagerService {
           .map((a) => this.agentModel.updateOne({ _id: a.agentId, status: 'in_match' }, { status: 'idle' })),
       );
       if (match.txHashes?.escrow) {
-        try { await this.settlementRouter.refund('solana', matchId); } catch {}
+        try { await this.settlementRouter.refund('bnb', matchId); } catch {}
       } else {
         this.logger.log(`Skipping refund for match ${matchId} — no escrow was deposited`);
       }
@@ -1133,7 +1133,7 @@ export class MatchManagerService {
           this.logger.error(`Cannot recover match ${matchId}: agent doc(s) missing`);
           await this.matchModel.updateOne({ _id: matchId }, { status: 'error', endedAt: new Date() });
           if (match.txHashes?.escrow) {
-            try { await this.settlementRouter.refund('solana', matchId); } catch {}
+            try { await this.settlementRouter.refund('bnb', matchId); } catch {}
           }
           await Promise.all([
             this.agentModel.updateOne({ _id: match.agents.a.agentId }, { status: 'idle' }),
@@ -1359,7 +1359,7 @@ export class MatchManagerService {
         this.logger.error(`Failed to recover match ${matchId}: ${message}`);
         await this.matchModel.updateOne({ _id: matchId }, { status: 'error', endedAt: new Date() });
         if (match.txHashes?.escrow) {
-          try { await this.settlementRouter.refund('solana', matchId); } catch {}
+          try { await this.settlementRouter.refund('bnb', matchId); } catch {}
         }
         await Promise.all([
           this.agentModel.updateOne({ _id: match.agents.a.agentId }, { status: 'idle' }),

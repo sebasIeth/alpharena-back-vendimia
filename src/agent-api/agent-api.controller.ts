@@ -73,7 +73,7 @@ export class AgentApiController {
     if (!agentDoc?.walletPrivateKey) throw new BadRequestException('Agent wallet key not found');
     const privKey = decrypt(agentDoc.walletPrivateKey);
     const token = body.token || 'USDC';
-    const chain = agentDoc.chain || 'solana';
+    const chain = agentDoc.chain || 'bnb';
 
     const decimals = this.settlementRouter.getTokenDecimals(chain, token);
     const amountAtomic = BigInt(Math.round(body.amount * 10 ** decimals));
@@ -133,8 +133,8 @@ export class AgentApiController {
       throw new BadRequestException('Agent does not have a wallet');
     }
 
-    const chain = (agent as any).chain || 'solana';
-    const [alpha, usdc, sol] = await Promise.all([
+    const chain = (agent as any).chain || 'bnb';
+    const [alpha, usdc, bnb] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA').catch(() => '0'),
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC').catch(() => '0'),
       this.settlementRouter.getAgentNativeBalance(chain, agent.walletAddress).catch(() => '0'),
@@ -143,7 +143,7 @@ export class AgentApiController {
     return {
       agentId: (agent as any)._id.toString(),
       walletAddress: agent.walletAddress,
-      balances: { alpha, usdc, sol },
+      balances: { alpha, usdc, bnb },
       depositAddress: agent.walletAddress,
     };
   }

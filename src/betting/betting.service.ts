@@ -9,7 +9,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Bet, Match, User } from '../database/schemas';
 import { EventBusService } from '../orchestrator/event-bus.service';
-import { SolanaSettlementService } from '../settlement/solana-settlement.service';
+import { SettlementService } from '../settlement/settlement.service';
 import { X402VerifierService } from '../settlement/x402-verifier.service';
 import { MatchEndedEvent } from '../common/types';
 
@@ -41,7 +41,7 @@ export class BettingService implements OnModuleInit {
     @InjectModel(Match.name) private readonly matchModel: Model<Match>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly eventBus: EventBusService,
-    private readonly solanaSettlement: SolanaSettlementService,
+    private readonly settlement: SettlementService,
     private readonly x402Verifier: X402VerifierService,
   ) {}
 
@@ -78,7 +78,7 @@ export class BettingService implements OnModuleInit {
     if (!user.walletAddress) throw new BadRequestException('No wallet linked to your account');
 
     // Spectator bets are always in USDC
-    const platformWallet = this.solanaSettlement.getPlatformWalletAddress();
+    const platformWallet = this.settlement.getPlatformWalletAddress();
     if (!platformWallet) {
       throw new BadRequestException('Settlement not configured');
     }
@@ -87,7 +87,7 @@ export class BettingService implements OnModuleInit {
 
     if (x402TxSignature) {
       // External x402 flow: verify on-chain payment
-      const decimals = this.solanaSettlement.getTokenDecimals('USDC');
+      const decimals = this.settlement.getTokenDecimals('USDC');
       const expectedAmount = BigInt(Math.round(amount * 10 ** decimals));
       const verification = await this.x402Verifier.verifyStakePayment(x402TxSignature, expectedAmount, platformWallet);
       if (!verification.valid) {
@@ -100,16 +100,16 @@ export class BettingService implements OnModuleInit {
       if (!userDoc?.walletPrivateKey) throw new BadRequestException('User wallet not configured');
 
       // Check USDC balance
-      const usdcBalance = await this.solanaSettlement.getAgentTokenBalance(userDoc.walletAddress!, 'USDC');
+      const usdcBalance = await this.settlement.getAgentTokenBalance(userDoc.walletAddress!, 'USDC');
       if (parseFloat(usdcBalance) < amount) {
         throw new BadRequestException(`Insufficient USDC balance: you have ${usdcBalance} but tried to bet ${amount}`);
       }
 
       const { decrypt } = require('../common/crypto.util');
       const privKey = decrypt(userDoc.walletPrivateKey);
-      const decimals = this.solanaSettlement.getTokenDecimals('USDC');
+      const decimals = this.settlement.getTokenDecimals('USDC');
       const amountAtomic = BigInt(Math.round(amount * 10 ** decimals));
-      betTxHash = await this.solanaSettlement.transferTokenFromAgent(privKey, platformWallet, amountAtomic, 'USDC');
+      betTxHash = await this.settlement.transferTokenFromAgent(privKey, platformWallet, amountAtomic, 'USDC');
       if (!betTxHash) throw new BadRequestException('USDC transfer failed');
     }
 
@@ -125,7 +125,7 @@ export class BettingService implements OnModuleInit {
       onAgentA,
       amount,
       txHash: betTxHash,
-      chain: 'solana',
+      chain: 'bnb',
       token: 'USDC',
     });
 
@@ -136,7 +136,7 @@ export class BettingService implements OnModuleInit {
       matchId,
       onAgentId,
       amount,
-      chain: 'solana',
+      chain: 'bnb',
       token: 'USDC',
     };
   }
@@ -169,7 +169,7 @@ export class BettingService implements OnModuleInit {
 
     return {
       matchId,
-      chain: 'solana',
+      chain: 'bnb',
       gameType: match.gameType,
       status: match.status,
       stakeAmount: match.stakeAmount,
@@ -216,7 +216,7 @@ export class BettingService implements OnModuleInit {
 
     return {
       matchId,
-      chain: 'solana',
+      chain: 'bnb',
       status: match.status,
       bettingOpen: isOpen,
       pool: {
@@ -286,7 +286,7 @@ export class BettingService implements OnModuleInit {
 
     return {
       matchId,
-      chain: 'solana',
+      chain: 'bnb',
       walletAddress: user?.walletAddress || '',
       bets: {
         byAgent: betsByAgent,
@@ -303,7 +303,7 @@ export class BettingService implements OnModuleInit {
   }
 
   /* ────────────────────────────────────────────────────────
-     CLAIM BET — pays out in USDC on Solana
+     CLAIM BET — pays out in USDC on Base
      ──────────────────────────────────────────────────────── */
   async claimBet(userId: string, matchId: string) {
     const match = await this.matchModel.findById(matchId).lean();
@@ -356,11 +356,11 @@ export class BettingService implements OnModuleInit {
     if (payout > 0) {
       const user = await this.userModel.findById(userId);
       if (user?.walletAddress) {
-        const decimals = this.solanaSettlement.getTokenDecimals('USDC');
+        const decimals = this.settlement.getTokenDecimals('USDC');
         const payoutAmount = BigInt(Math.round(payout * 10 ** decimals));
 
         // Pay winner in USDC
-        txHash = await this.solanaSettlement.transferTokenFromPlatform(
+        txHash = await this.settlement.transferTokenFromPlatform(
           user.walletAddress,
           payoutAmount,
           'USDC',
@@ -369,7 +369,7 @@ export class BettingService implements OnModuleInit {
         // Send fee to fee wallet
         const feeAmount = BigInt(Math.round((total - payout) * 10 ** decimals));
         if (feeAmount > BigInt(0)) {
-          feeTxHash = await this.solanaSettlement.sendFeeToFeeWallet(feeAmount, 'USDC').catch((e) => {
+          feeTxHash = await this.settlement.sendFeeToFeeWallet(feeAmount, 'USDC').catch((e) => {
             this.logger.error(`Failed to send betting fee: ${e.message}`);
             return null;
           });
@@ -387,7 +387,7 @@ export class BettingService implements OnModuleInit {
     return {
       txHash: txHash || `claim-${matchId}-${userId}`,
       matchId,
-      chain: 'solana',
+      chain: 'bnb',
     };
   }
 
@@ -452,7 +452,7 @@ export class BettingService implements OnModuleInit {
 
       claims.push({
         matchId: mId,
-        chain: 'solana',
+        chain: 'bnb',
         gameType: match.gameType,
         outcome,
         betsByAgent,

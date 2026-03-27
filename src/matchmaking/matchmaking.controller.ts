@@ -44,7 +44,7 @@ export class MatchmakingController {
 
     // Verify agent wallet has on-chain balance
     const matchToken = dto.token || 'USDC';
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || 'bnb';
 
     // Auto-calculate stake: $1 USD equivalent
     let stakeAmount = dto.stakeAmount ?? 1;

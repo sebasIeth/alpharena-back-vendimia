@@ -19,7 +19,7 @@ export class Transaction extends Document {
   @Prop({ required: true })
   amount: number;
 
-  @Prop({ type: String, default: 'base' })
+  @Prop({ type: String, default: 'bnb' })
   chain: string;
 
   @Prop({ type: String, default: null })

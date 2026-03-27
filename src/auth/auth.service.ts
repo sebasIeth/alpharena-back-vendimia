@@ -3,8 +3,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
-import { Keypair } from '@solana/web3.js';
-import * as bs58 from 'bs58';
+import { ethers } from 'ethers';
 import * as crypto from 'crypto';
 import { User } from '../database/schemas';
 import { ConfigService } from '../common/config/config.service';
@@ -58,14 +57,14 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Auto-generate Solana wallet for the user
-    const keypair = Keypair.generate();
+    // Auto-generate Base (EVM) wallet for the user
+    const wallet = ethers.Wallet.createRandom();
 
     const user = await this.userModel.create({
       username,
       passwordHash,
-      walletAddress: keypair.publicKey.toBase58(),
-      walletPrivateKey: bs58.default.encode(keypair.secretKey),
+      walletAddress: wallet.address,
+      walletPrivateKey: wallet.privateKey,
       email: email ?? null,
       emailVerified: !!email,
       balance: 0,
@@ -81,10 +80,8 @@ export class AuthService {
 
     this.logger.log(`New user registered: ${username}`);
 
-    // Create token accounts in background (don't block registration)
-    this.settlementRouter.ensureTokenAccounts('solana', keypair.publicKey.toBase58()).catch((err) =>
-      this.logger.warn(`Failed to create ATAs for user ${username}: ${err.message}`),
-    );
+    // No-op on Base (EVM doesn't need ATAs), but keep the call for consistency
+    this.settlementRouter.ensureTokenAccounts('bnb', wallet.address).catch(() => {});
 
     return {
       token,

@@ -6,6 +6,7 @@ import {
   http,
   formatEther,
   formatUnits,
+  parseUnits,
   type Chain,
   type PublicClient,
   type WalletClient,
@@ -14,12 +15,18 @@ import {
 } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import * as chains from 'viem/chains';
-import { arenaAbi, erc20Abi } from './contracts/arena-abi';
+import { erc20Abi } from './contracts/arena-abi';
+
+export type TokenSymbol = 'ALPHA' | 'USDC';
+
+interface TokenConfig {
+  address: Address;
+  decimals: number;
+}
 
 /** USDC addresses per chain */
 const USDC_BY_CHAIN: Record<number, Address> = {
-  8453: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',  // Base mainnet
-  84532: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // Base Sepolia
+  56: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',   // BNB mainnet
 };
 
 interface SettlementClients {
@@ -29,404 +36,178 @@ interface SettlementClients {
 }
 
 /**
- * High-level NestJS service that wraps all on-chain settlement operations.
+ * Settlement service for Base (EVM).
  *
- * All escrow/payout/refund operations use USDC (ERC-20) on Base.
+ * All operations use direct ERC-20 transfers via the platform (relayer) wallet.
+ * No smart contract required — the relayer holds funds and distributes payouts.
  *
- * When blockchain configuration is not provided (common during local
- * development), every write method logs a warning and returns `null` instead
- * of a transaction hash.  This allows the rest of the platform to operate
- * normally without a live chain.
+ * When blockchain configuration is not provided, every write method logs a
+ * warning and returns `null` instead of a transaction hash.
  */
 @Injectable()
 export class SettlementService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SettlementService.name);
   private clients: SettlementClients | null = null;
-  private contractAddress: Address | null = null;
-  private usdcAddress: Address | null = null;
+  private feeWalletAddress: Address | null = null;
+  private feeWalletKey: string | null = null;
   private rpcUrl: string | null = null;
   private chain: Chain | null = null;
+  private tokens: Map<string, TokenConfig> = new Map();
 
   constructor(private readonly configService: ConfigService) {}
 
   // ── Lifecycle ────────────────────────────────────────────────────
 
-  onModuleInit(): void {
-    this.start();
+  async onModuleInit(): Promise<void> {
+    await this.start();
   }
 
   onModuleDestroy(): void {
     this.stop();
   }
 
-  /**
-   * Initialise viem clients.  If any required blockchain config value is
-   * missing the service enters "no-op" mode and all write operations become
-   * safe stubs.
-   */
-  private start(): void {
+  private async start(): Promise<void> {
     const rpcUrl = this.configService.rpcUrl;
     const privateKey = this.configService.privateKey;
-    const contractAddr = this.configService.contractAddress;
-    const chainIdStr = String(this.configService.chainId);
-    const usdcAddr = this.configService.usdcAddress;
 
-    if (!rpcUrl || !privateKey || !contractAddr) {
+    if (!rpcUrl || !privateKey) {
       this.logger.warn(
-        'Blockchain configuration incomplete (SETTLEMENT_RPC_URL / SETTLEMENT_PRIVATE_KEY / SETTLEMENT_CONTRACT_ADDRESS). ' +
-          'Settlement service running in no-op mode — transactions will not be submitted.',
+        'Blockchain configuration incomplete (RPC_URL / PRIVATE_KEY). ' +
+          'Settlement service running in no-op mode.',
       );
       return;
     }
 
-    const resolvedChainId = chainIdStr ? parseInt(chainIdStr, 10) : 84532;
-    this.clients = this.createSettlementClient(rpcUrl, privateKey, resolvedChainId);
-    this.contractAddress = contractAddr as Address;
+    const chainId = this.configService.chainId;
+    this.chain = this.resolveChain(chainId);
     this.rpcUrl = rpcUrl;
-    this.chain = this.resolveChain(resolvedChainId);
 
-    // Resolve USDC address from config or chain ID
-    this.usdcAddress = (usdcAddr as Address) ?? USDC_BY_CHAIN[resolvedChainId] ?? null;
+    const account = privateKeyToAccount(privateKey as `0x${string}`);
+    const publicClient = createPublicClient({ chain: this.chain, transport: http(rpcUrl) });
+    const walletClient = createWalletClient({ chain: this.chain, transport: http(rpcUrl), account });
+    this.clients = { publicClient, walletClient, account };
 
-    if (!this.usdcAddress) {
-      this.logger.warn(
-        `No USDC address configured or known for chain ${resolvedChainId}. Escrow will fail.`,
-      );
+    // Fee wallet
+    const feeWallet = this.configService.feeWallet;
+    const feeWalletKey = this.configService.feeWalletKey;
+    if (feeWallet) {
+      this.feeWalletAddress = feeWallet as Address;
+      this.feeWalletKey = feeWalletKey ?? null;
+      this.logger.log(`Fee wallet: ${this.feeWalletAddress}`);
+    }
+
+    // Register USDC
+    const usdcAddr = (this.configService.usdcAddress as Address) ?? USDC_BY_CHAIN[chainId] ?? null;
+    if (usdcAddr) {
+      try {
+        const decimals = await publicClient.readContract({
+          address: usdcAddr,
+          abi: erc20Abi,
+          functionName: 'decimals',
+        });
+        this.tokens.set('USDC', { address: usdcAddr, decimals: Number(decimals) });
+        this.logger.log(`USDC token: ${usdcAddr} (${decimals} decimals)`);
+      } catch {
+        // Fallback: Base USDC is 6 decimals
+        this.tokens.set('USDC', { address: usdcAddr, decimals: 6 });
+        this.logger.warn(`USDC token: ${usdcAddr} (fallback 6 decimals)`);
+      }
+    }
+
+    // Register ALPHA
+    const alphaAddr = this.configService.alphaAddress;
+    if (alphaAddr) {
+      try {
+        const decimals = await publicClient.readContract({
+          address: alphaAddr as Address,
+          abi: erc20Abi,
+          functionName: 'decimals',
+        });
+        this.tokens.set('ALPHA', { address: alphaAddr as Address, decimals: Number(decimals) });
+        this.logger.log(`ALPHA token: ${alphaAddr} (${decimals} decimals)`);
+      } catch {
+        this.tokens.set('ALPHA', { address: alphaAddr as Address, decimals: 18 });
+        this.logger.warn(`ALPHA token: ${alphaAddr} (fallback 18 decimals)`);
+      }
     }
 
     this.logger.log(
-      `Settlement service started (USDC mode) — chain=${resolvedChainId}, contract=${contractAddr}, usdc=${this.usdcAddress}, account=${this.clients.account.address}`,
+      `Settlement service started — chain=${chainId}, tokens=[${[...this.tokens.keys()].join(', ')}], platform=${account.address}`,
     );
   }
 
-  /**
-   * Tear down clients and release resources.
-   */
   private stop(): void {
     this.clients = null;
-    this.contractAddress = null;
-    this.usdcAddress = null;
     this.rpcUrl = null;
     this.chain = null;
+    this.tokens.clear();
     this.logger.log('Settlement service stopped');
   }
 
-  // ── Client creation ──────────────────────────────────────────────
+  // ── Chain resolution ──────────────────────────────────────────────
 
-  /**
-   * Resolve a viem Chain definition by its numeric chain ID.
-   */
   private resolveChain(chainId: number): Chain {
     for (const value of Object.values(chains)) {
-      if (
-        typeof value === 'object' &&
-        value !== null &&
-        'id' in value &&
-        (value as Chain).id === chainId
-      ) {
+      if (typeof value === 'object' && value !== null && 'id' in value && (value as Chain).id === chainId) {
         return value as Chain;
       }
     }
-    throw new Error(
-      `Unsupported chain ID: ${chainId}. No matching chain definition found in viem/chains.`,
-    );
-  }
-
-  /**
-   * Create a pair of viem clients (public + wallet) for on-chain settlement.
-   */
-  private createSettlementClient(
-    rpcUrl: string,
-    privateKey: string,
-    chainId: number,
-  ): SettlementClients {
-    const chain = this.resolveChain(chainId);
-    const account = privateKeyToAccount(privateKey as `0x${string}`);
-
-    const publicClient = createPublicClient({
-      chain,
-      transport: http(rpcUrl),
-    });
-
-    const walletClient = createWalletClient({
-      chain,
-      transport: http(rpcUrl),
-      account,
-    });
-
-    return { publicClient, walletClient, account };
+    throw new Error(`Unsupported chain ID: ${chainId}`);
   }
 
   // ── Helpers ──────────────────────────────────────────────────────
 
   private isReady(): boolean {
-    return this.clients !== null && this.contractAddress !== null && this.usdcAddress !== null;
+    return this.clients !== null;
   }
 
-  /**
-   * Convert an application-level match ID string into a bytes32 hex value
-   * suitable for the smart contract.  If the value is already a 0x-prefixed
-   * 66-char hex string it is returned as-is; otherwise it is right-padded
-   * with zeroes.
-   */
-  private toBytes32(matchId: string): `0x${string}` {
-    if (matchId.startsWith('0x') && matchId.length === 66) {
-      return matchId as `0x${string}`;
+  private resolveToken(tokenOrSymbol: string): TokenConfig | null {
+    const bySymbol = this.tokens.get(tokenOrSymbol);
+    if (bySymbol) return bySymbol;
+    for (const config of this.tokens.values()) {
+      if (config.address.toLowerCase() === tokenOrSymbol.toLowerCase()) return config;
     }
-    // Encode as UTF-8 bytes then pad to 32 bytes
-    const hex = Buffer.from(matchId, 'utf8').toString('hex').slice(0, 64);
-    return `0x${hex.padEnd(64, '0')}` as `0x${string}`;
+    return null;
   }
 
-  /**
-   * Ensure the Arena contract has sufficient USDC allowance from the operator.
-   * If current allowance is less than the required amount, sends an approve tx.
-   */
-  private async ensureUsdcAllowance(spender: Address, amount: bigint): Promise<void> {
-    const { publicClient, walletClient, account } = this.clients!;
+  // ── Token Info ────────────────────────────────────────────────────
 
-    const currentAllowance = await publicClient.readContract({
-      address: this.usdcAddress!,
-      abi: erc20Abi,
-      functionName: 'allowance',
-      args: [account.address, spender],
-    });
-
-    if ((currentAllowance as bigint) >= amount) {
-      return;
-    }
-
-    // Approve max uint256 so we only need to do this once
-    const maxApproval = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff');
-
-    this.logger.log(`Approving max USDC spend for Arena contract: spender=${spender}`);
-
-    const { request } = await publicClient.simulateContract({
-      address: this.usdcAddress!,
-      abi: erc20Abi,
-      functionName: 'approve',
-      args: [spender, maxApproval],
-      account,
-    });
-
-    const txHash = await walletClient.writeContract(request);
-    await publicClient.waitForTransactionReceipt({ hash: txHash, confirmations: 2 });
-
-    this.logger.log(`USDC max approval confirmed: txHash=${txHash}`);
+  getTokenDecimals(tokenOrSymbol: string = 'USDC'): number {
+    return this.resolveToken(tokenOrSymbol)?.decimals ?? 6;
   }
 
-  // ── Public API ───────────────────────────────────────────────────
-
-  /**
-   * Lock escrow USDC for a match.
-   *
-   * Automatically approves USDC spending if the current allowance is insufficient.
-   * The transaction is submitted and then we wait for at least one confirmation.
-   *
-   * @returns The transaction hash, or `null` when running in no-op mode.
-   */
-  async escrow(
-    matchId: string,
-    agentAAddress: string,
-    agentBAddress: string,
-    stakeAmount: bigint,
-  ): Promise<string | null> {
-    if (!this.isReady()) {
-      this.logger.warn(`escrow skipped — settlement service not initialised (matchId=${matchId})`);
-      return null;
-    }
-
-    const { publicClient, walletClient, account } = this.clients!;
-    const matchIdBytes32 = this.toBytes32(matchId);
-
-    this.logger.log(
-      `Submitting escrowFunds transaction (USDC): matchId=${matchId}, agentA=${agentAAddress}, agentB=${agentBAddress}, stakeAmount=${stakeAmount.toString()}`,
-    );
-
-    try {
-      // Ensure USDC approval before escrow
-      await this.ensureUsdcAllowance(this.contractAddress!, stakeAmount);
-
-      const { request } = await publicClient.simulateContract({
-        address: this.contractAddress!,
-        abi: arenaAbi,
-        functionName: 'escrowFunds',
-        args: [matchIdBytes32, agentAAddress as Address, agentBAddress as Address, stakeAmount],
-        account,
-      });
-
-      const txHash = await walletClient.writeContract(request);
-
-      this.logger.log(`escrowFunds transaction sent, waiting for receipt: txHash=${txHash}, matchId=${matchId}`);
-
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-      if (receipt.status === 'reverted') {
-        throw new Error(`escrowFunds transaction reverted: ${txHash}`);
-      }
-
-      this.logger.log(
-        `escrowFunds confirmed: txHash=${txHash}, blockNumber=${receipt.blockNumber.toString()}, matchId=${matchId}`,
-      );
-
-      return txHash;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to lock escrow: matchId=${matchId}, error=${message}`);
-      throw error;
-    }
+  getTokenAddress(symbol: string): string | null {
+    return this.tokens.get(symbol)?.address ?? null;
   }
 
-  /**
-   * Release escrowed USDC to the match winner.
-   *
-   * @returns The transaction hash, or `null` when running in no-op mode.
-   */
-  async payout(
-    matchId: string,
-    winnerAddress: string,
-    amount: bigint,
-  ): Promise<string | null> {
-    if (!this.isReady()) {
-      this.logger.warn(`payout skipped — settlement service not initialised (matchId=${matchId})`);
-      return null;
-    }
-
-    const { publicClient, walletClient, account } = this.clients!;
-    const matchIdBytes32 = this.toBytes32(matchId);
-
-    this.logger.log(
-      `Submitting releasePayout transaction: matchId=${matchId}, winner=${winnerAddress}, amount=${amount.toString()}`,
-    );
-
-    try {
-      const { request } = await publicClient.simulateContract({
-        address: this.contractAddress!,
-        abi: arenaAbi,
-        functionName: 'releasePayout',
-        args: [matchIdBytes32, winnerAddress as Address, amount],
-        account,
-      });
-
-      const txHash = await walletClient.writeContract(request);
-
-      this.logger.log(`releasePayout transaction sent, waiting for receipt: txHash=${txHash}, matchId=${matchId}`);
-
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-      if (receipt.status === 'reverted') {
-        throw new Error(`releasePayout transaction reverted: ${txHash}`);
-      }
-
-      this.logger.log(
-        `releasePayout confirmed: txHash=${txHash}, blockNumber=${receipt.blockNumber.toString()}, matchId=${matchId}`,
-      );
-
-      return txHash;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to release payout: matchId=${matchId}, error=${message}`);
-      throw error;
-    }
+  getSupportedTokens(): string[] {
+    return [...this.tokens.keys()];
   }
 
-  /**
-   * Refund both parties of a cancelled / errored match.
-   *
-   * @returns The transaction hash, or `null` when running in no-op mode.
-   */
-  async refund(matchId: string): Promise<string | null> {
-    if (!this.isReady()) {
-      this.logger.warn(`refund skipped — settlement service not initialised (matchId=${matchId})`);
-      return null;
-    }
-
-    const { publicClient, walletClient, account } = this.clients!;
-    const matchIdBytes32 = this.toBytes32(matchId);
-
-    this.logger.log(`Submitting refundMatch transaction: matchId=${matchId}`);
-
-    try {
-      const { request } = await publicClient.simulateContract({
-        address: this.contractAddress!,
-        abi: arenaAbi,
-        functionName: 'refundMatch',
-        args: [matchIdBytes32],
-        account,
-      });
-
-      const txHash = await walletClient.writeContract(request);
-
-      this.logger.log(`refundMatch transaction sent, waiting for receipt: txHash=${txHash}, matchId=${matchId}`);
-
-      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-
-      if (receipt.status === 'reverted') {
-        throw new Error(`refundMatch transaction reverted: ${txHash}`);
-      }
-
-      this.logger.log(
-        `refundMatch confirmed: txHash=${txHash}, blockNumber=${receipt.blockNumber.toString()}, matchId=${matchId}`,
-      );
-
-      return txHash;
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to refund match: matchId=${matchId}, error=${message}`);
-      throw error;
-    }
-  }
-
-  // ── Agent Wallet Operations ───────────────────────────────────────
+  // ── Transfer: Agent → Destination ─────────────────────────────────
 
   /**
-   * Read on-chain USDC balance for an agent wallet.
-   * Returns the balance as a human-readable string (e.g. "100.5").
+   * Transfer ERC-20 tokens from an agent wallet to a destination.
+   * The agent pays gas for this transaction.
    */
-  async getAgentUsdcBalance(walletAddress: string): Promise<string> {
-    if (!this.clients || !this.usdcAddress) return '0';
-
-    const balance = await this.clients.publicClient.readContract({
-      address: this.usdcAddress,
-      abi: erc20Abi,
-      functionName: 'balanceOf',
-      args: [walletAddress as Address],
-    });
-
-    return formatUnits(balance as bigint, 18);
-  }
-
-  /**
-   * Read on-chain ETH balance for an agent wallet (needed for gas).
-   * Returns the balance as a human-readable string (e.g. "0.001").
-   */
-  async getAgentEthBalance(walletAddress: string): Promise<string> {
-    if (!this.clients) return '0';
-
-    const balance = await this.clients.publicClient.getBalance({
-      address: walletAddress as Address,
-    });
-
-    return formatEther(balance);
-  }
-
-  /**
-   * Transfer USDC from an agent's wallet to a destination address.
-   * Creates a temporary wallet client with the agent's private key.
-   *
-   * @returns The transaction hash, or `null` when running in no-op mode.
-   */
-  async transferUsdcFromAgent(
+  async transferTokenFromAgent(
     agentPrivateKey: string,
     to: string,
     amount: bigint,
+    tokenOrSymbol: string = 'USDC',
   ): Promise<string | null> {
-    if (!this.clients || !this.usdcAddress) {
-      this.logger.warn('transferUsdcFromAgent skipped — settlement service not initialised');
+    if (!this.isReady()) {
+      this.logger.warn('transferTokenFromAgent skipped — not initialised');
       return null;
     }
 
-    const { publicClient } = this.clients;
+    const token = this.resolveToken(tokenOrSymbol);
+    if (!token) {
+      this.logger.error(`Unknown token: ${tokenOrSymbol}`);
+      return null;
+    }
+
+    const { publicClient } = this.clients!;
     const agentAccount = privateKeyToAccount(agentPrivateKey as `0x${string}`);
     const agentWalletClient = createWalletClient({
       chain: this.chain!,
@@ -435,11 +216,11 @@ export class SettlementService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.logger.log(
-      `Transferring USDC from agent ${agentAccount.address} to ${to}, amount=${amount.toString()}`,
+      `Transfer ${tokenOrSymbol} from agent ${agentAccount.address} to ${to}, amount=${amount}`,
     );
 
     const { request } = await publicClient.simulateContract({
-      address: this.usdcAddress,
+      address: token.address,
       abi: erc20Abi,
       functionName: 'transfer',
       args: [to as Address, amount],
@@ -449,32 +230,39 @@ export class SettlementService implements OnModuleInit, OnModuleDestroy {
     const txHash = await agentWalletClient.writeContract(request);
     await publicClient.waitForTransactionReceipt({ hash: txHash });
 
-    this.logger.log(`USDC transfer confirmed: txHash=${txHash}`);
+    this.logger.log(`Agent transfer confirmed: ${txHash}`);
     return txHash;
   }
 
+  // ── Transfer: Platform → Destination ──────────────────────────────
+
   /**
-   * Transfer USDC from the platform wallet to a destination address.
-   *
-   * @returns The transaction hash, or `null` when running in no-op mode.
+   * Transfer ERC-20 tokens from the platform wallet to a destination.
    */
-  async transferUsdcFromPlatform(
+  async transferTokenFromPlatform(
     to: string,
     amount: bigint,
+    tokenOrSymbol: string = 'USDC',
   ): Promise<string | null> {
     if (!this.isReady()) {
-      this.logger.warn('transferUsdcFromPlatform skipped — settlement service not initialised');
+      this.logger.warn('transferTokenFromPlatform skipped — not initialised');
+      return null;
+    }
+
+    const token = this.resolveToken(tokenOrSymbol);
+    if (!token) {
+      this.logger.error(`Unknown token: ${tokenOrSymbol}`);
       return null;
     }
 
     const { publicClient, walletClient, account } = this.clients!;
 
     this.logger.log(
-      `Transferring USDC from platform ${account.address} to ${to}, amount=${amount.toString()}`,
+      `Transfer ${tokenOrSymbol} from platform ${account.address} to ${to}, amount=${amount}`,
     );
 
     const { request } = await publicClient.simulateContract({
-      address: this.usdcAddress!,
+      address: token.address,
       abi: erc20Abi,
       functionName: 'transfer',
       args: [to as Address, amount],
@@ -484,21 +272,155 @@ export class SettlementService implements OnModuleInit, OnModuleDestroy {
     const txHash = await walletClient.writeContract(request);
     await publicClient.waitForTransactionReceipt({ hash: txHash });
 
-    this.logger.log(`USDC platform transfer confirmed: txHash=${txHash}`);
+    this.logger.log(`Platform transfer confirmed: ${txHash}`);
     return txHash;
   }
 
+  // ── Fee Wallet ────────────────────────────────────────────────────
+
   /**
-   * Get the platform wallet address (the operator account).
+   * Send fee to the dedicated fee wallet.
    */
+  async sendFeeToFeeWallet(
+    amount: bigint,
+    tokenOrSymbol: string = 'USDC',
+  ): Promise<string | null> {
+    if (!this.feeWalletAddress) {
+      this.logger.warn('No fee wallet configured, fee stays in platform wallet');
+      return null;
+    }
+    return this.transferTokenFromPlatform(this.feeWalletAddress, amount, tokenOrSymbol);
+  }
+
+  getFeeWalletAddress(): string | null {
+    return this.feeWalletAddress;
+  }
+
+  // ── Balance Queries ───────────────────────────────────────────────
+
+  /**
+   * Read ERC-20 token balance for an address.
+   */
+  async getAgentTokenBalance(walletAddress: string, tokenOrSymbol: string = 'USDC'): Promise<string> {
+    if (!this.isReady()) return '0';
+
+    const token = this.resolveToken(tokenOrSymbol);
+    if (!token) return '0';
+
+    try {
+      const balance = await this.clients!.publicClient.readContract({
+        address: token.address,
+        abi: erc20Abi,
+        functionName: 'balanceOf',
+        args: [walletAddress as Address],
+      });
+      return formatUnits(balance as bigint, token.decimals);
+    } catch {
+      return '0';
+    }
+  }
+
+  /**
+   * Read native ETH balance for an address.
+   */
+  async getAgentEthBalance(walletAddress: string): Promise<string> {
+    if (!this.isReady()) return '0';
+    try {
+      const balance = await this.clients!.publicClient.getBalance({
+        address: walletAddress as Address,
+      });
+      return formatEther(balance);
+    } catch {
+      return '0';
+    }
+  }
+
+  // ── Platform Info ─────────────────────────────────────────────────
+
   getPlatformWalletAddress(): string | null {
     return this.clients?.account.address ?? null;
   }
 
+  // ── Match Settlement (simple transfer pattern, no smart contract) ──
+
   /**
-   * Get the USDC token decimals used by this service.
+   * Escrow is implicit on Base — funds are transferred from agents to the
+   * platform wallet before the match starts. This is a no-op.
    */
-  getUsdcDecimals(): number {
-    return 18;
+  async escrow(
+    matchId: string,
+    _agentAAddress: string,
+    _agentBAddress: string,
+    _stakeAmount: bigint,
+  ): Promise<string | null> {
+    this.logger.log(`Escrow is implicit (agent transfers) for match ${matchId}`);
+    return null;
+  }
+
+  /**
+   * Pay out the winner from the platform wallet.
+   */
+  async payout(
+    matchId: string,
+    winnerAddress: string,
+    amount: bigint,
+    tokenOrSymbol: string = 'USDC',
+  ): Promise<string | null> {
+    this.logger.log(`Payout for match ${matchId}: ${winnerAddress}, amount=${amount}`);
+    return this.transferTokenFromPlatform(winnerAddress, amount, tokenOrSymbol);
+  }
+
+  /**
+   * Refund agents from the platform wallet.
+   */
+  async refund(
+    matchId: string,
+    refundTargets?: Array<{ address: string; amount: bigint }>,
+    tokenOrSymbol: string = 'USDC',
+  ): Promise<string | null> {
+    if (!refundTargets?.length) {
+      this.logger.warn(`Refund for match ${matchId} — no refund targets`);
+      return null;
+    }
+    let lastTxHash: string | null = null;
+    for (const target of refundTargets) {
+      lastTxHash = await this.transferTokenFromPlatform(target.address, target.amount, tokenOrSymbol);
+    }
+    return lastTxHash;
+  }
+
+  /**
+   * No-op on EVM — ERC-20 tokens can be received without prior setup.
+   */
+  async ensureTokenAccounts(_walletAddress: string): Promise<void> {
+    // No ATAs needed on EVM
+  }
+
+  // ── ALPHA price from DexScreener ──────────────────────────────────
+
+  private alphaPriceUsd: number | null = null;
+  private alphaPriceLastFetch = 0;
+  private readonly ALPHA_PRICE_TTL = 60_000;
+
+  async getAlphaPriceUsd(): Promise<number | null> {
+    if (this.alphaPriceUsd !== null && Date.now() - this.alphaPriceLastFetch < this.ALPHA_PRICE_TTL) {
+      return this.alphaPriceUsd;
+    }
+    const alphaAddr = this.getTokenAddress('ALPHA');
+    if (!alphaAddr) return null;
+    try {
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${alphaAddr}`);
+      if (!res.ok) return this.alphaPriceUsd;
+      const data = await res.json();
+      const price = data?.pairs?.[0]?.priceUsd ? parseFloat(data.pairs[0].priceUsd) : null;
+      if (price !== null && !isNaN(price)) {
+        this.alphaPriceUsd = price;
+        this.alphaPriceLastFetch = Date.now();
+        this.logger.log(`ALPHA price updated: $${price}`);
+      }
+      return this.alphaPriceUsd;
+    } catch {
+      return this.alphaPriceUsd;
+    }
   }
 }

@@ -31,7 +31,7 @@ export class ConfigService {
   }
 
   get chainId(): number {
-    return parseInt(process.env.CHAIN_ID || '84532', 10);
+    return parseInt(process.env.CHAIN_ID || '56', 10);
   }
 
   get contractAddress(): string | undefined {
@@ -106,29 +106,17 @@ export class ConfigService {
     return process.env.TWITTER_BEARER_TOKEN;
   }
 
-  // ── Solana Settlement ──
-  get solanaRpcUrl(): string | undefined {
-    return process.env.SOLANA_RPC_URL;
+  // ── Base Settlement ──
+  get alphaAddress(): string | undefined {
+    return process.env.ALPHA_ADDRESS;
   }
 
-  get solanaPrivateKey(): string | undefined {
-    return process.env.SOLANA_PRIVATE_KEY;
+  get feeWallet(): string | undefined {
+    return process.env.FEE_WALLET;
   }
 
-  get solanaAlphaMint(): string | undefined {
-    return process.env.SOLANA_ALPHA_MINT;
-  }
-
-  get solanaUsdcMint(): string | undefined {
-    return process.env.SOLANA_USDC_MINT;
-  }
-
-  get solanaFeeWallet(): string | undefined {
-    return process.env.SOLANA_FEE_WALLET;
-  }
-
-  get solanaFeeWalletKey(): string | undefined {
-    return process.env.SOLANA_FEE_WALLET_KEY;
+  get feeWalletKey(): string | undefined {
+    return process.env.FEE_WALLET_KEY;
   }
 
   private getRequired(key: string): string {

@@ -78,7 +78,7 @@ export class ResultHandlerService {
       eloOutcome,
     );
 
-    const matchChain = matchDoc.chain || 'solana';
+    const matchChain = matchDoc.chain || 'bnb';
     const matchToken = matchDoc.token || 'USDC';
     const tokenDecimals = this.settlementRouter.getTokenDecimals(matchChain, matchToken);
 

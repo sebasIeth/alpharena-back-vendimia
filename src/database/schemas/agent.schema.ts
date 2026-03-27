@@ -88,7 +88,7 @@ export class Agent extends Document {
   @Prop({ type: [String], default: ['chess'] })
   gameTypes: string[];
 
-  @Prop({ type: String, default: 'base' })
+  @Prop({ type: String, default: 'bnb' })
   chain: string;
 
   @Prop({ default: false })

@@ -47,7 +47,7 @@ export class Match extends Document {
   @Prop({ required: true })
   gameType: string;
 
-  @Prop({ type: String, default: 'solana' })
+  @Prop({ type: String, default: 'bnb' })
   chain: string;
 
   @Prop({ type: String, default: 'ALPHA' })
