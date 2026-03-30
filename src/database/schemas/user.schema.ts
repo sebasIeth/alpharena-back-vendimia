@@ -13,10 +13,10 @@ export class User extends Document {
   @Prop({ required: true, unique: true, index: true })
   username: string;
 
-  @Prop({ type: String, unique: true, sparse: true, default: null })
+  @Prop({ type: String, unique: true, sparse: true })
   email: string | null;
 
-  @Prop({ type: String, required: false, default: null })
+  @Prop({ type: String, required: false })
   passwordHash: string | null;
 
   @Prop({ default: 0 })

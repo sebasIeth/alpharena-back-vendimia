@@ -147,14 +147,13 @@ export class AuthService {
 
     const user = await this.userModel.create({
       username,
-      passwordHash: null,
       walletAddress: custodialKeypair.publicKey.toBase58(),
       walletPrivateKey: bs58.default.encode(custodialKeypair.secretKey),
       externalWalletAddress: walletAddress,
       walletType: 'external',
-      email: null,
       emailVerified: false,
       balance: 0,
+      // Omit email and passwordHash entirely so sparse unique index ignores them
     });
 
     const payload: AuthPayload = { userId: user._id.toString(), username: user.username };
