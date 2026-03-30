@@ -585,18 +585,21 @@ export class MatchManagerService {
           this.logger.log(`USDC match ${matchId}: stake collected via x402`);
         } else {
           // ALPHA: transfer from each agent wallet to platform
-          const agentPrivKeys: Record<string, string> = {};
+          // Non-custodial agents (walletPrivateKey = null) already pre-paid via x402
+          const agentPrivKeys: Record<string, string | null> = {};
           for (const [side] of agentEntries) {
             const doc = agentDocsBySide[side]!;
             const privKey = doc.walletPrivateKey ? decrypt(doc.walletPrivateKey) : null;
-            if (!privKey) {
-              throw new Error(`Missing agent wallet private key for side ${side}`);
-            }
             agentPrivKeys[side] = privKey;
           }
 
           for (const [side] of agentEntries) {
-            const txHash = await this.settlementRouter.transferTokenFromAgent(matchChain, agentPrivKeys[side], platformWallet, stakeAmountToken, matchToken);
+            if (!agentPrivKeys[side]) {
+              // Non-custodial agent: stake was pre-paid via x402
+              this.logger.log(`ALPHA match ${matchId}: side ${side} pre-paid via x402 (external wallet)`);
+              continue;
+            }
+            const txHash = await this.settlementRouter.transferTokenFromAgent(matchChain, agentPrivKeys[side]!, platformWallet, stakeAmountToken, matchToken);
             if (txHash) transferTxHashes.push(txHash);
           }
         }

@@ -5,7 +5,7 @@ import { MatchmakingService } from './matchmaking.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthPayload } from '../common/types';
-import { Agent, Match } from '../database/schemas';
+import { Agent, Match, User } from '../database/schemas';
 import { IsString, MinLength, IsNumber, Min, Max, IsIn, IsOptional } from 'class-validator';
 import { MIN_STAKE, MAX_STAKE } from '../common/constants/game.constants';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
@@ -29,6 +29,7 @@ export class MatchmakingController {
     private readonly matchmakingService: MatchmakingService,
     @InjectModel(Agent.name) private readonly agentModel: Model<Agent>,
     @InjectModel(Match.name) private readonly matchModel: Model<Match>,
+    @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly settlementRouter: SettlementRouterService,
     private readonly x402PaymentStore: X402PaymentStore,
   ) {}
@@ -58,21 +59,27 @@ export class MatchmakingController {
     }
 
     if (stakeAmount > 0) {
-      if (matchToken === 'USDC') {
-        // USDC: always requires x402 pre-payment
+      // Check if agent uses an external wallet (non-custodial)
+      const isNonCustodial = !agent.walletPrivateKey && agent.type === 'human';
+
+      if (matchToken === 'USDC' || isNonCustodial) {
+        // USDC always requires x402 pre-payment
+        // Non-custodial agents also require x402 pre-payment for ANY token
         const x402Payment = this.x402PaymentStore.getPayment(dto.agentId);
         if (!x402Payment) {
           throw new BadRequestException(
-            'USDC matches require x402 payment. POST to /x402/stake first, pay the USDC, then join the queue.',
+            isNonCustodial
+              ? `External wallet matches require x402 pre-payment. POST to /x402/stake first with token=${matchToken}.`
+              : 'USDC matches require x402 payment. POST to /x402/stake first, pay the USDC, then join the queue.',
           );
         }
         if (x402Payment.amount < stakeAmount) {
           throw new BadRequestException(
-            `x402 payment insufficient: paid ${x402Payment.amount} USDC but stake requires ${stakeAmount}`,
+            `x402 payment insufficient: paid ${x402Payment.amount} ${matchToken} but stake requires ${stakeAmount}`,
           );
         }
       } else {
-        // ALPHA: direct balance check
+        // ALPHA with custodial agent: direct balance check
         const tokenBalance = await this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, matchToken);
         if (parseFloat(tokenBalance) < stakeAmount) {
           throw new BadRequestException(

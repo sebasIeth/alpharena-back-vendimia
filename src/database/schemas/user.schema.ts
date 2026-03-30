@@ -16,8 +16,8 @@ export class User extends Document {
   @Prop({ type: String, unique: true, sparse: true, default: null })
   email: string | null;
 
-  @Prop({ required: true })
-  passwordHash: string;
+  @Prop({ type: String, required: false, default: null })
+  passwordHash: string | null;
 
   @Prop({ default: 0 })
   balance: number;
@@ -36,6 +36,15 @@ export class User extends Document {
 
   @Prop({ default: false })
   emailVerified: boolean;
+
+  @Prop({ type: String, default: null, unique: true, sparse: true })
+  externalWalletAddress: string | null;
+
+  @Prop({ type: String, default: 'custodial', enum: ['custodial', 'external'] })
+  walletType: string;
+
+  @Prop({ type: String, default: null })
+  walletNonce: string | null;
 
   createdAt: Date;
   updatedAt: Date;

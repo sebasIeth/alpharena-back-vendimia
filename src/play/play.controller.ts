@@ -61,6 +61,12 @@ export class PlayController {
     return this.playService.getStatus(user.userId);
   }
 
+  @Get('agent')
+  async getAgent(@CurrentUser() user: AuthPayload) {
+    const agent = await this.playService.getOrCreateHumanAgent(user.userId);
+    return { agentId: agent._id.toString(), walletAddress: agent.walletAddress };
+  }
+
   @Get('balance')
   async balance(@CurrentUser() user: AuthPayload) {
     return this.playService.getBalance(user.userId);
@@ -69,6 +75,11 @@ export class PlayController {
   @Post('withdraw')
   async withdraw(@CurrentUser() user: AuthPayload, @Body() dto: WithdrawDto) {
     return this.playService.withdraw(user.userId, dto.amount, dto.to, dto.token);
+  }
+
+  @Post('build-withdraw')
+  async buildWithdraw(@CurrentUser() user: AuthPayload, @Body() dto: WithdrawDto) {
+    return this.playService.buildWithdraw(user.userId, dto.amount, dto.to, dto.token);
   }
 
   @Post('move')

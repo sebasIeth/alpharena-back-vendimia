@@ -283,6 +283,57 @@ export class SolanaSettlementService implements OnModuleInit {
     }
   }
 
+  /**
+   * Build a token transfer tx where platform is fee payer, partially signed by platform.
+   * The user (sender) still needs to sign before submitting.
+   * Returns base64-encoded serialized transaction.
+   */
+  async buildPartiallySignedTransfer(
+    senderAddress: string,
+    to: string,
+    amount: bigint,
+    tokenMintOrSymbol: string = 'USDC',
+  ): Promise<{ transaction: string; blockhash: string } | null> {
+    if (!this.isReady()) {
+      this.logger.warn('buildPartiallySignedTransfer skipped — not initialised');
+      return null;
+    }
+
+    const token = this.resolveToken(tokenMintOrSymbol);
+    if (!token) {
+      this.logger.error(`Unknown token: ${tokenMintOrSymbol}`);
+      return null;
+    }
+
+    const senderPubkey = new PublicKey(senderAddress);
+    const toPublicKey = new PublicKey(to);
+
+    // Ensure ATAs exist (platform pays for creation)
+    const sourceAta = await getOrCreateAssociatedTokenAccount(
+      this.connection!, this.platformKeypair!, token.mint, senderPubkey, true, undefined, undefined, token.programId,
+    );
+    const destAta = await getOrCreateAssociatedTokenAccount(
+      this.connection!, this.platformKeypair!, token.mint, toPublicKey, true, undefined, undefined, token.programId,
+    );
+
+    const tx = new Transaction().add(
+      createTransferInstruction(sourceAta.address, destAta.address, senderPubkey, amount, [], token.programId),
+    );
+
+    const { blockhash } = await this.connection!.getLatestBlockhash('confirmed');
+    tx.recentBlockhash = blockhash;
+    tx.feePayer = this.platformKeypair!.publicKey;
+
+    // Platform partially signs (as fee payer)
+    tx.partialSign(this.platformKeypair!);
+
+    // Serialize with requireAllSignatures=false since user hasn't signed yet
+    const serialized = tx.serialize({ requireAllSignatures: false }).toString('base64');
+
+    this.logger.log(`Built partially signed tx: ${senderAddress} -> ${to}, ${amount} ${tokenMintOrSymbol}`);
+    return { transaction: serialized, blockhash };
+  }
+
   getPlatformWalletAddress(): string | null {
     return this.platformKeypair?.publicKey.toBase58() ?? null;
   }

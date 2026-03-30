@@ -148,4 +148,17 @@ export class SettlementRouterService {
   async getAlphaPriceUsd(): Promise<number | null> {
     return this.solanaSettlement.getAlphaPriceUsd();
   }
+
+  async buildPartiallySignedTransfer(
+    chain: string,
+    senderAddress: string,
+    to: string,
+    amount: bigint,
+    token: string = 'USDC',
+  ): Promise<{ transaction: string; blockhash: string } | null> {
+    if (chain === 'solana') {
+      return this.solanaSettlement.buildPartiallySignedTransfer(senderAddress, to, amount, token);
+    }
+    return null;
+  }
 }

@@ -75,7 +75,10 @@ export class BettingService implements OnModuleInit {
 
     const user = await this.userModel.findById(userId);
     if (!user) throw new NotFoundException('User not found');
-    if (!user.walletAddress) throw new BadRequestException('No wallet linked to your account');
+
+    const isExternal = user.walletType === 'external' && user.externalWalletAddress;
+    const activeWallet = isExternal ? user.externalWalletAddress! : user.walletAddress;
+    if (!activeWallet) throw new BadRequestException('No wallet linked to your account');
 
     // Spectator bets are always in USDC
     const platformWallet = this.solanaSettlement.getPlatformWalletAddress();
@@ -86,7 +89,7 @@ export class BettingService implements OnModuleInit {
     let betTxHash: string | null = null;
 
     if (x402TxSignature) {
-      // External x402 flow: verify on-chain payment
+      // x402 flow: verify on-chain payment (used by external wallets and API agents)
       const decimals = this.solanaSettlement.getTokenDecimals('USDC');
       const expectedAmount = BigInt(Math.round(amount * 10 ** decimals));
       const verification = await this.x402Verifier.verifyStakePayment(x402TxSignature, expectedAmount, platformWallet);
@@ -94,6 +97,11 @@ export class BettingService implements OnModuleInit {
         throw new BadRequestException(`Payment verification failed: ${verification.error}`);
       }
       betTxHash = x402TxSignature;
+    } else if (isExternal) {
+      // External wallet without x402 tx — they must pre-sign
+      throw new BadRequestException(
+        'External wallet bets require a signed transaction. Use the x402 flow or provide x402TxSignature.',
+      );
     } else {
       // Custodial flow: transfer USDC from user wallet to platform
       const userDoc = await this.userModel.findById(userId).select('+walletPrivateKey');
@@ -120,7 +128,7 @@ export class BettingService implements OnModuleInit {
     const bet = await this.betModel.create({
       matchId,
       userId: new Types.ObjectId(userId),
-      walletAddress: user.walletAddress,
+      walletAddress: activeWallet,
       onAgentId,
       onAgentA,
       amount,
@@ -283,11 +291,12 @@ export class BettingService implements OnModuleInit {
 
     const canClaim = (outcome === 'won' || outcome === 'refund') && !claimed && total > 0;
     const user = await this.userModel.findById(userId).lean();
+    const isExt = user?.walletType === 'external' && user?.externalWalletAddress;
 
     return {
       matchId,
       chain: 'solana',
-      walletAddress: user?.walletAddress || '',
+      walletAddress: (isExt ? user?.externalWalletAddress : user?.walletAddress) || '',
       bets: {
         byAgent: betsByAgent,
         total: total.toFixed(2),
@@ -355,13 +364,16 @@ export class BettingService implements OnModuleInit {
 
     if (payout > 0) {
       const user = await this.userModel.findById(userId);
-      if (user?.walletAddress) {
+      const isExt = user?.walletType === 'external' && user?.externalWalletAddress;
+      const payoutWallet = isExt ? user.externalWalletAddress! : user?.walletAddress;
+
+      if (payoutWallet) {
         const decimals = this.solanaSettlement.getTokenDecimals('USDC');
         const payoutAmount = BigInt(Math.round(payout * 10 ** decimals));
 
-        // Pay winner in USDC
+        // Pay winner in USDC to their active wallet
         txHash = await this.solanaSettlement.transferTokenFromPlatform(
-          user.walletAddress,
+          payoutWallet,
           payoutAmount,
           'USDC',
         );

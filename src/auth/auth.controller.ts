@@ -6,6 +6,8 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SendVerificationCodeDto } from './dto/send-verification-code.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
+import { ConnectWalletDto, SwitchWalletDto } from './dto/connect-wallet.dto';
+import { RegisterWalletDto } from './dto/register-wallet.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthPayload } from '../common/types';
@@ -24,6 +26,17 @@ export class AuthController {
   @HttpCode(200)
   async login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
+  }
+
+  @Post('register-wallet')
+  async registerWithWallet(@Body() dto: RegisterWalletDto) {
+    return this.authService.registerWithWallet(dto.walletAddress, dto.signature);
+  }
+
+  @Post('login-wallet')
+  @HttpCode(200)
+  async loginWithWallet(@Body() dto: RegisterWalletDto) {
+    return this.authService.loginWithWallet(dto.walletAddress, dto.signature);
   }
 
   @Post('send-verification-code')
@@ -68,5 +81,32 @@ export class AuthController {
       throw new NotFoundException('User not found');
     }
     return { walletAddress: profile.user.walletAddress };
+  }
+
+  @Get('wallet/nonce')
+  @UseGuards(JwtAuthGuard)
+  async getWalletNonce(@CurrentUser() user: AuthPayload) {
+    return this.authService.getWalletNonce(user.userId);
+  }
+
+  @Post('wallet/connect')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async connectWallet(@CurrentUser() user: AuthPayload, @Body() dto: ConnectWalletDto) {
+    return this.authService.connectWallet(user.userId, dto.walletAddress, dto.signature);
+  }
+
+  @Post('wallet/switch')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async switchWallet(@CurrentUser() user: AuthPayload, @Body() dto: SwitchWalletDto) {
+    return this.authService.switchWallet(user.userId, dto.walletType);
+  }
+
+  @Post('wallet/disconnect')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(200)
+  async disconnectWallet(@CurrentUser() user: AuthPayload) {
+    return this.authService.disconnectWallet(user.userId);
   }
 }
