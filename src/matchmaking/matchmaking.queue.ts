@@ -103,8 +103,9 @@ export class MatchmakingQueue {
     return [...types];
   }
 
-  /** Remove entries older than the given threshold and stuck 'pairing' entries */
-  async cleanupStaleEntries(staleMs: number = 10 * 60 * 1000, pairingTimeoutMs: number = 60 * 1000): Promise<number> {
+  /** Remove entries older than the given threshold and stuck 'pairing' entries.
+   *  Returns the removed entries so callers can issue refunds. */
+  async cleanupStaleEntries(staleMs: number = 10 * 60 * 1000, pairingTimeoutMs: number = 60 * 1000): Promise<QueueEntryData[]> {
     const now = Date.now();
     const staleThreshold = new Date(now - staleMs);
     const pairingThreshold = new Date(now - pairingTimeoutMs);
@@ -115,7 +116,7 @@ export class MatchmakingQueue {
       (e.status === 'pairing' && e.joinedAt < pairingThreshold),
     );
 
-    if (toRemove.length === 0) return 0;
+    if (toRemove.length === 0) return [];
 
     for (const entry of toRemove) {
       const index = this.entries.findIndex(e => e.agentId === entry.agentId);
@@ -125,6 +126,6 @@ export class MatchmakingQueue {
     const agentIds = toRemove.map(e => e.agentId);
     await this.queueEntryModel.deleteMany({ agentId: { $in: agentIds } });
     this.logger.log(`Cleaned ${toRemove.length} stale/stuck queue entries: ${agentIds.join(', ')}`);
-    return toRemove.length;
+    return toRemove;
   }
 }

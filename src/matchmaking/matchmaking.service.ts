@@ -9,6 +9,7 @@ import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { EventBusService } from '../orchestrator/event-bus.service';
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { ActiveMatchesService } from '../orchestrator/active-matches.service';
+import { SettlementRouterService } from '../settlement/settlement-router.service';
 
 @Injectable()
 export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
@@ -33,7 +34,29 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
     private readonly eventBus: EventBusService,
     private readonly x402PaymentStore: X402PaymentStore,
     private readonly activeMatches: ActiveMatchesService,
+    private readonly settlementRouter: SettlementRouterService,
   ) {}
+
+  /**
+   * Refund stake to an agent that was removed from queue without matching.
+   * Platform sends back the escrowed tokens.
+   */
+  private async refundStake(entry: QueueEntryData): Promise<void> {
+    try {
+      const agent = await this.agentModel.findById(entry.agentId);
+      if (!agent?.walletAddress || !entry.stakeAmount || entry.stakeAmount <= 0) return;
+
+      const chain = agent.chain || 'solana';
+      const token = entry.token || 'USDC';
+      const decimals = this.settlementRouter.getTokenDecimals(chain, token);
+      const amountAtomic = BigInt(Math.round(entry.stakeAmount * 10 ** decimals));
+
+      const txHash = await this.settlementRouter.transferTokenFromPlatform(chain, agent.walletAddress, amountAtomic, token);
+      this.logger.log(`Refunded ${entry.stakeAmount} ${token} to agent ${entry.agentId} (tx: ${txHash})`);
+    } catch (err: any) {
+      this.logger.error(`Failed to refund agent ${entry.agentId}: ${err.message}`);
+    }
+  }
 
   async onModuleInit() {
     await this.queue.loadFromDatabase();
@@ -154,8 +177,14 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
   }
 
   async leaveQueue(agentId: string): Promise<void> {
+    const entry = await this.queue.get(agentId);
     await this.queue.remove(agentId);
     this.logger.log(`Agent ${agentId} left matchmaking queue`);
+
+    // Refund stake if agent had pre-paid
+    if (entry && entry.stakeAmount > 0) {
+      await this.refundStake(entry);
+    }
   }
 
   async getQueueStatus(agentId: string): Promise<QueueEntryData | undefined> {
@@ -236,9 +265,10 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
                   for (const entry of pokerGroup) {
                     const payment = this.x402PaymentStore.getPayment(entry.agentId);
                     if (!payment) {
-                      this.logger.warn(`x402 payment expired for poker agent ${entry.agentId}, removing from queue`);
+                      this.logger.warn(`x402 payment expired for poker agent ${entry.agentId}, removing from queue and refunding`);
                       await this.queue.remove(entry.agentId);
                       await this.agentModel.updateOne({ _id: entry.agentId }, { $set: { status: 'idle' } });
+                      await this.refundStake(entry);
                     } else {
                       validGroup.push(entry);
                     }
@@ -299,9 +329,10 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
             for (const entry of [entryA, entryB]) {
               const payment = this.x402PaymentStore.getPayment(entry.agentId);
               if (!payment) {
-                this.logger.warn(`x402 payment expired for agent ${entry.agentId}, removing from queue`);
+                this.logger.warn(`x402 payment expired for agent ${entry.agentId}, removing from queue and refunding`);
                 await this.queue.remove(entry.agentId);
                 await this.agentModel.updateOne({ _id: entry.agentId }, { $set: { status: 'idle' } });
+                await this.refundStake(entry);
                 throw new Error(`x402 payment expired for agent ${entry.agentId}`);
               }
             }
@@ -346,8 +377,15 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
   private async periodicCleanup(): Promise<void> {
     try {
       // Clean stale queue entries and stuck pairing entries
-      const cleaned = await this.queue.cleanupStaleEntries();
-      if (cleaned > 0) {
+      const removedEntries = await this.queue.cleanupStaleEntries();
+      if (removedEntries.length > 0) {
+        // Refund stakes for removed entries
+        for (const entry of removedEntries) {
+          if (entry.stakeAmount > 0) {
+            await this.refundStake(entry);
+          }
+        }
+
         // Reset agent statuses for cleaned entries
         const queuedAgentIds = new Set(this.queue.getAll().map(e => e.agentId));
         const stuckAgents = await this.agentModel.find({ status: { $in: ['queued', 'pairing'] } });
