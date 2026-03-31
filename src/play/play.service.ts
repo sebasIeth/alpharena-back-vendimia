@@ -190,7 +190,7 @@ export class PlayService {
             inQueue: false,
             inMatch: true,
             agentId: agent._id.toString(),
-            matchId: (activeMatch as any)._id.toString(),
+            matchId: activeMatch._id.toString(),
             gameType: activeMatch.gameType,
             matchStatus: activeMatch.status,
           };
@@ -265,10 +265,10 @@ export class PlayService {
         if (expectedWallet && agent.walletAddress !== expectedWallet) {
           agent.walletAddress = expectedWallet;
           if (isExternal) {
-            agent.walletPrivateKey = null as any;
+            agent.walletPrivateKey = null as unknown as string;
           } else {
             const userWithKey = await this.userModel.findById(userId).select('+walletPrivateKey');
-            agent.walletPrivateKey = userWithKey?.walletPrivateKey ?? (null as any);
+            agent.walletPrivateKey = userWithKey?.walletPrivateKey ?? (null as unknown as string);
           }
           await agent.save();
           this.logger.log(`Synced human agent wallet for user ${userId} to ${user.walletType}`);

@@ -22,7 +22,7 @@ export class HeartbeatService {
   ) {}
 
   async heartbeat(agent: Agent) {
-    const agentId = (agent as any)._id.toString();
+    const agentId = agent._id.toString();
 
     // Update last heartbeat
     await this.agentModel.updateOne(
@@ -104,7 +104,7 @@ export class HeartbeatService {
           continue;
         }
 
-        results[(agent as any)._id.toString()] = await this.heartbeat(agent);
+        results[agent._id.toString()] = await this.heartbeat(agent);
       } catch (err) {
         const prefix = apiKey.substring(0, 11);
         results[prefix] = { error: 'Heartbeat failed' };

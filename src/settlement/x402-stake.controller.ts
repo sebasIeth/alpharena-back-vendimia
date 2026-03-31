@@ -120,7 +120,7 @@ export class X402StakeController {
     if (user?.userId) {
       if (agent.userId && agent.userId.toString() !== user.userId) throw new BadRequestException('You do not own this agent');
     } else if (agentAuth) {
-      if ((agentAuth as any)._id.toString() !== agentId) throw new BadRequestException('API key does not match this agent');
+      if (agentAuth._id.toString() !== agentId) throw new BadRequestException('API key does not match this agent');
     }
 
     const platformWallet = this.solanaSettlement.getPlatformWalletAddress();

@@ -4,7 +4,8 @@ import { Model } from 'mongoose';
 import { randomBytes, createHash, randomUUID } from 'crypto';
 import { Keypair } from '@solana/web3.js';
 import * as bs58Module from 'bs58';
-const bs58Encode = (bs58Module as any).default?.encode ?? (bs58Module as any).encode;
+const bs58Mod = bs58Module as Record<string, unknown>;
+const bs58Encode = ((bs58Mod.default as Record<string, unknown>)?.encode ?? bs58Mod.encode) as (input: Uint8Array) => string;
 import { Agent, Match } from '../database/schemas';
 import { ActiveMatchesService } from '../orchestrator/active-matches.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
@@ -45,7 +46,7 @@ export class AgentApiService {
     const walletPrivateKey = encrypt(bs58Encode(keypair.secretKey));
 
     const agent = await this.agentModel.create({
-      userId: dto.userId ?? null as any,
+      userId: dto.userId ?? null,
       name: dto.name,
       type: 'pull',
       gameTypes: dto.gameTypes || [],
@@ -81,7 +82,7 @@ export class AgentApiService {
   }
 
   async getAgentStatus(agent: Agent) {
-    const agentId = (agent as any)._id.toString();
+    const agentId = agent._id.toString();
 
     // Check if in an active match
     let activeMatchId: string | null = null;
@@ -115,7 +116,7 @@ export class AgentApiService {
   }
 
   async joinQueue(agent: Agent, dto: JoinQueueDto) {
-    const agentId = (agent as any)._id.toString();
+    const agentId = agent._id.toString();
 
     if (agent.status !== 'idle') {
       throw new BadRequestException(
@@ -136,7 +137,7 @@ export class AgentApiService {
     }
 
     // Verify agent wallet has some balance
-    const chain = (agent as any).chain || 'solana';
+    const chain = agent.chain || 'solana';
     const [alphaBalance, usdcBalance, solBalance] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA').catch(() => '0'),
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC').catch(() => '0'),
@@ -178,7 +179,7 @@ export class AgentApiService {
     }
 
     agent.status = 'queued';
-    await (agent as any).save();
+    await agent.save();
 
     try {
       await this.matchmakingService.joinQueue(
@@ -200,13 +201,13 @@ export class AgentApiService {
       };
     } catch (err) {
       agent.status = 'idle';
-      await (agent as any).save();
+      await agent.save();
       throw err;
     }
   }
 
   async leaveQueue(agent: Agent) {
-    const agentId = (agent as any)._id.toString();
+    const agentId = agent._id.toString();
 
     if (agent.status !== 'queued') {
       throw new BadRequestException(`Agent is not in the queue (current status: "${agent.status}")`);
@@ -214,13 +215,13 @@ export class AgentApiService {
 
     await this.matchmakingService.leaveQueue(agentId);
     agent.status = 'idle';
-    await (agent as any).save();
+    await agent.save();
 
     return { message: 'Successfully left the queue', agentId };
   }
 
   async getGameState(agent: Agent, matchId: string) {
-    const agentId = (agent as any)._id.toString();
+    const agentId = agent._id.toString();
     const matchState = this.activeMatches.getMatch(matchId);
 
     if (!matchState) {
@@ -313,7 +314,7 @@ export class AgentApiService {
   }
 
   async submitMove(agent: Agent, matchId: string, dto: SubmitMoveDto) {
-    const agentId = (agent as any)._id.toString();
+    const agentId = agent._id.toString();
     const matchState = this.activeMatches.getMatch(matchId);
 
     if (!matchState) {

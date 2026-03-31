@@ -17,6 +17,11 @@ import { RoomsService } from './rooms.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
 import { Agent, Match } from '../database/schemas';
 
+interface AuthenticatedSocket extends Socket {
+  user?: { userId: string; username: string };
+  role?: string;
+}
+
 @WebSocketGateway({
   cors: { origin: '*' },
   namespace: '/ws',
@@ -54,8 +59,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     try {
       const payload = jwt.verify(token, this.configService.jwtSecret) as { userId: string; username: string };
-      (client as any).user = payload;
-      (client as any).role = (client.handshake.query.role as string) || 'spectator';
+      (client as AuthenticatedSocket).user = payload;
+      (client as AuthenticatedSocket).role = (client.handshake.query.role as string) || 'spectator';
       this.rooms.registerClient(client);
       this.logger.log(`Client ${client.id} connected (user: ${payload.username})`);
     } catch {
@@ -140,7 +145,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { matchId: string; move: unknown },
   ): Promise<void> {
-    const user = (client as any).user as { userId: string; username: string } | undefined;
+    const user = (client as AuthenticatedSocket).user;
     if (!user) {
       client.emit('message', { type: 'error', data: { message: 'Not authenticated.' } });
       return;
@@ -215,7 +220,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     }
     if (!pendingSide) return;
 
-    const user = (client as any).user as { userId: string } | undefined;
+    const user = (client as AuthenticatedSocket).user;
     if (!user) return;
 
     // Check if this user owns the agent that needs to move
@@ -237,7 +242,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       // Add poker state if available
       if (match.gameType === 'poker' && match.pokerState) {
-        const pk = match.pokerState as any;
+        const pk = match.pokerState as Record<string, unknown> & {
+          communityCards?: string[];
+          pot?: number;
+          street?: string;
+          handNumber?: number;
+          players?: Record<string, { holeCards?: string[]; stack?: number }>;
+        };
         if (pk.communityCards) payload.pokerCommunityCards = pk.communityCards;
         if (pk.pot != null) payload.pokerPot = pk.pot;
         if (pk.street) payload.pokerStreet = pk.street;

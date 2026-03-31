@@ -34,6 +34,18 @@ interface PoolResult {
   totalBetsB: number;
 }
 
+interface MatchLike {
+  _id: { toString(): string };
+  agents: Record<string, { agentId: { toString(): string }; name: string; eloAtStart?: number; userId?: { toString(): string } }>;
+  status: string;
+  gameType: string;
+  stakeAmount?: number;
+  result?: { winnerId?: { toString(): string } };
+  endedAt?: Date;
+  updatedAt?: Date;
+  createdAt?: Date;
+}
+
 @Injectable()
 export class BettingService implements OnModuleInit {
   private readonly logger = new Logger(BettingService.name);
@@ -133,7 +145,7 @@ export class BettingService implements OnModuleInit {
     }
 
     // Find which side the betted agent is on
-    const agentSides = Object.entries(match.agents as Record<string, any>);
+    const agentSides = Object.entries(match.agents);
     const onAgentA = agentSides.find(([, v]) => v.agentId?.toString() === onAgentId)?.[0] === 'a';
 
     const bet = await this.betModel.create({
@@ -262,7 +274,7 @@ export class BettingService implements OnModuleInit {
 
     const betsByAgent: Record<string, number> = {};
     for (const bet of userBets) {
-      const agentId = bet.onAgentId || (bet.onAgentA ? (match.agents as any).a?.agentId?.toString() : (match.agents as any).b?.agentId?.toString()) || '';
+      const agentId = bet.onAgentId || (bet.onAgentA ? match.agents.a?.agentId?.toString() : match.agents.b?.agentId?.toString()) || '';
       betsByAgent[agentId] = (betsByAgent[agentId] || 0) + bet.amount;
     }
 
@@ -357,7 +369,7 @@ export class BettingService implements OnModuleInit {
 
     const betsByAgent: Record<string, number> = {};
     for (const bet of userBets) {
-      const agentId = bet.onAgentId || (bet.onAgentA ? (match.agents as any).a?.agentId?.toString() : (match.agents as any).b?.agentId?.toString()) || '';
+      const agentId = bet.onAgentId || (bet.onAgentA ? match.agents.a?.agentId?.toString() : match.agents.b?.agentId?.toString()) || '';
       betsByAgent[agentId] = (betsByAgent[agentId] || 0) + bet.amount;
     }
     const total = Object.values(betsByAgent).reduce((s, v) => s + v, 0);
@@ -456,12 +468,12 @@ export class BettingService implements OnModuleInit {
     }> = [];
 
     for (const match of matches) {
-      const mId = (match as any)._id.toString();
+      const mId = match._id.toString();
       const betsForMatch = unclaimedBets.filter((b) => b.matchId === mId);
 
       const betsByAgent: Record<string, number> = {};
       for (const bet of betsForMatch) {
-        const agentId = bet.onAgentId || (bet.onAgentA ? (match.agents as any).a?.agentId?.toString() : (match.agents as any).b?.agentId?.toString()) || '';
+        const agentId = bet.onAgentId || (bet.onAgentA ? match.agents.a?.agentId?.toString() : match.agents.b?.agentId?.toString()) || '';
         betsByAgent[agentId] = (betsByAgent[agentId] || 0) + bet.amount;
       }
       const total = Object.values(betsByAgent).reduce((s, v) => s + v, 0);
@@ -500,14 +512,14 @@ export class BettingService implements OnModuleInit {
     return { claims };
   }
 
-  private getMatchAgentIds(match: any): string[] {
+  private getMatchAgentIds(match: MatchLike): string[] {
     if (!match.agents) return [];
     return Object.values(match.agents)
-      .filter((a: any) => a?.agentId)
-      .map((a: any) => a.agentId.toString());
+      .filter((a) => a?.agentId)
+      .map((a) => a.agentId.toString());
   }
 
-  private async calculatePool(matchId: string, match?: any): Promise<PoolResult> {
+  private async calculatePool(matchId: string, match?: MatchLike): Promise<PoolResult> {
     const bets = await this.betModel.find({ matchId }).lean();
 
     const resolvedBets = bets.map((b) => ({

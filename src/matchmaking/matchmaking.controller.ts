@@ -135,7 +135,7 @@ export class MatchmakingController {
         }).select('_id gameType status').lean();
 
         if (activeMatch) {
-          return { inQueue: false, agentId, agentStatus: agent.status, matchId: (activeMatch as any)._id.toString(), matchStatus: activeMatch.status, gameType: activeMatch.gameType };
+          return { inQueue: false, agentId, agentStatus: agent.status, matchId: activeMatch._id.toString(), matchStatus: activeMatch.status, gameType: activeMatch.gameType };
         }
       }
       return { inQueue: false, agentId, agentStatus: agent.status };

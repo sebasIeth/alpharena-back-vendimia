@@ -44,13 +44,12 @@ export class AgentApiController {
   @HttpCode(200)
   async linkToUser(@CurrentAgent() agent: Agent, @Body() body: { userId: string }) {
     if (!body.userId) throw new BadRequestException('userId is required');
-    const agentDoc = agent as any;
-    if (agentDoc.userId) {
+    if (agent.userId) {
       throw new BadRequestException('Agent is already linked to a user. Unlink first or create a new agent.');
     }
-    agentDoc.userId = new Types.ObjectId(body.userId);
-    await agentDoc.save();
-    return { message: 'Agent linked to user', agentId: agentDoc._id.toString(), userId: body.userId };
+    agent.userId = new Types.ObjectId(body.userId);
+    await agent.save();
+    return { message: 'Agent linked to user', agentId: agent._id.toString(), userId: body.userId };
   }
 
   /**
@@ -69,7 +68,7 @@ export class AgentApiController {
     if (!agent.walletAddress) throw new BadRequestException('Agent does not have a wallet');
 
     const { decrypt } = require('../common/crypto.util');
-    const agentDoc = await this.agentModel.findById((agent as any)._id).select('+walletPrivateKey');
+    const agentDoc = await this.agentModel.findById(agent._id).select('+walletPrivateKey');
     if (!agentDoc?.walletPrivateKey) throw new BadRequestException('Agent wallet key not found');
     const privKey = decrypt(agentDoc.walletPrivateKey);
     const token = body.token || 'USDC';
@@ -133,7 +132,7 @@ export class AgentApiController {
       throw new BadRequestException('Agent does not have a wallet');
     }
 
-    const chain = (agent as any).chain || 'solana';
+    const chain = agent.chain || 'solana';
     const [alpha, usdc, sol] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA').catch(() => '0'),
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC').catch(() => '0'),
@@ -141,7 +140,7 @@ export class AgentApiController {
     ]);
 
     return {
-      agentId: (agent as any)._id.toString(),
+      agentId: agent._id.toString(),
       walletAddress: agent.walletAddress,
       balances: { alpha, usdc, sol },
       depositAddress: agent.walletAddress,

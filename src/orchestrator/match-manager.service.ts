@@ -921,7 +921,7 @@ export class MatchManagerService {
         }
         const winningSide: Side | undefined = bestSide && !tied ? bestSide as Side : undefined;
         this.logger.log(`Match ${matchId}: max hands (${maxHands}/${playerCount}p) reached, winner by stack: ${winningSide ?? 'draw'}`);
-        await this.endMatch(matchId, 'max_hands' as any, winningSide);
+        await this.endMatch(matchId, 'max_hands', winningSide);
         return;
       }
 
@@ -985,7 +985,7 @@ export class MatchManagerService {
     this.endedMatches.add(matchId);
 
     try {
-      await this.resultHandler.handleMatchEnd(matchId, reason, forcedWinnerSide as any);
+      await this.resultHandler.handleMatchEnd(matchId, reason, forcedWinnerSide);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error(`Error ending match ${matchId}: ${message}`);
@@ -1104,7 +1104,7 @@ export class MatchManagerService {
       const matchId = match._id.toString();
       this.logger.warn(`Cancelling stuck 'starting' match ${matchId}`);
       await this.matchModel.updateOne({ _id: matchId }, { status: 'cancelled', endedAt: new Date() });
-      const agentEntries = Object.values(match.agents || {}) as any[];
+      const agentEntries = Object.values(match.agents || {});
       await Promise.all(
         agentEntries
           .filter((a) => a?.agentId)
