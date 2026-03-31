@@ -36,8 +36,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   handleConnection(client: Socket): void {
-    // Support token in auth object (preferred) or query string (legacy)
-    const token = (client.handshake.auth?.token || client.handshake.query.token) as string | undefined;
+    // Support token in: auth object, query string, or httpOnly cookie
+    let token = (client.handshake.auth?.token || client.handshake.query.token) as string | undefined;
+    if (!token && client.handshake.headers.cookie) {
+      const match = client.handshake.headers.cookie.match(/arena_token=([^;]+)/);
+      if (match) token = match[1];
+    }
 
     if (!token) {
       client.emit('message', {
