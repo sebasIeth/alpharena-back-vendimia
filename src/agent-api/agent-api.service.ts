@@ -241,7 +241,12 @@ export class AgentApiService {
     }
 
     const gameType = this.matchManager.getGameType(matchId);
-    const isYourTurn = this.humanMoveService.getPendingAgentId(matchId) === agentId;
+
+    // In RPS, pending moves use key "matchId:side" since both players move simultaneously
+    let isYourTurn = this.humanMoveService.getPendingAgentId(matchId) === agentId;
+    if (!isYourTurn && gameType === 'rps' && agentSide) {
+      isYourTurn = this.humanMoveService.getPendingAgentId(`${matchId}:${agentSide}`) === agentId;
+    }
 
     const baseState: Record<string, unknown> = {
       matchId,
@@ -282,6 +287,17 @@ export class AgentApiService {
           baseState.legalActions = getLegalActions(pokerState);
         }
       }
+    } else if (gameType === 'rps') {
+      const rpsState = this.matchManager.getRpsState?.(matchId);
+      if (rpsState) {
+        baseState.currentRound = rpsState.currentRound;
+        baseState.bestOf = rpsState.bestOf;
+        baseState.scores = rpsState.scores;
+        baseState.phase = rpsState.phase;
+        if (isYourTurn) {
+          baseState.legalMoves = ['rock', 'paper', 'scissors'];
+        }
+      }
     } else {
       // Reversi/Marrakech — use generic game state
       baseState.board = matchState.gameState.board;
@@ -289,7 +305,7 @@ export class AgentApiService {
       baseState.moveNumber = matchState.gameState.moveNumber;
       baseState.isGameOver = matchState.gameState.gameOver;
       if (isYourTurn) {
-        baseState.legalMoves = matchState.gameState.board; // Simplified — turn controller computes legal moves
+        baseState.legalMoves = matchState.gameState.board;
       }
     }
 
@@ -335,6 +351,12 @@ export class AgentApiService {
         throw new BadRequestException('Poker move requires "action"');
       }
       move = { action: dto.action, amount: dto.amount };
+    } else if (gameType === 'rps') {
+      const rpsMove = dto.move || dto.action;
+      if (!rpsMove || !['rock', 'paper', 'scissors'].includes(rpsMove)) {
+        throw new BadRequestException('RPS move requires "move" with value "rock", "paper", or "scissors"');
+      }
+      move = rpsMove;
     } else {
       // Reversi/Marrakech
       if (dto.row === undefined || dto.col === undefined) {
@@ -343,7 +365,14 @@ export class AgentApiService {
       move = [dto.row, dto.col];
     }
 
-    const submitted = this.humanMoveService.submitMove(matchId, agentId, move);
+    // In RPS, try the per-side key first (matchId:side) since both players move simultaneously
+    let submitted = false;
+    if (gameType === 'rps' && agentSide) {
+      submitted = this.humanMoveService.submitMove(`${matchId}:${agentSide}`, agentId, move);
+    }
+    if (!submitted) {
+      submitted = this.humanMoveService.submitMove(matchId, agentId, move);
+    }
     if (!submitted) {
       throw new BadRequestException('Failed to submit move. It may not be your turn.');
     }

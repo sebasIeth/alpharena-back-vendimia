@@ -1400,6 +1400,10 @@ export class MatchManagerService {
     return this.pokerStates.get(matchId);
   }
 
+  getRpsState(matchId: string): RpsGameState | undefined {
+    return this.rpsStates.get(matchId);
+  }
+
   getGameType(matchId: string): string {
     return this.matchGameTypes.get(matchId) ?? 'chess';
   }
