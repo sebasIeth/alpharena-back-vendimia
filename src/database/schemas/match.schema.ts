@@ -127,6 +127,7 @@ export class Match extends Document {
 
 export const MatchSchema = SchemaFactory.createForClass(Match);
 MatchSchema.index({ status: 1 });
+MatchSchema.index({ status: 1, updatedAt: -1 });
 // Note: These agent indexes only cover 2-player matches (slots a & b).
 // For N-player matches, queries on agents.c, agents.d, etc. won't use these indexes.
 MatchSchema.index({ 'agents.a.userId': 1 });

@@ -130,4 +130,5 @@ export class Agent extends Document {
 
 export const AgentSchema = SchemaFactory.createForClass(Agent);
 AgentSchema.index({ eloRating: 1, status: 1 });
+AgentSchema.index({ status: 1, createdAt: -1 });
 AgentSchema.index({ 'stats.winRate': -1 });

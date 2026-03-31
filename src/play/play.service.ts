@@ -11,6 +11,8 @@ import { DEFAULT_ELO } from '../common/constants/game.constants';
 @Injectable()
 export class PlayService {
   private readonly logger = new Logger(PlayService.name);
+  private readonly withdrawCooldowns = new Map<string, number>();
+  private static readonly WITHDRAW_COOLDOWN_MS = 60_000; // 1 minute
 
   constructor(
     @InjectModel(Agent.name) private readonly agentModel: Model<Agent>,
@@ -305,7 +307,16 @@ export class PlayService {
     return agent;
   }
 
+  private checkWithdrawCooldown(userId: string) {
+    const lastWithdraw = this.withdrawCooldowns.get(userId);
+    if (lastWithdraw && Date.now() - lastWithdraw < PlayService.WITHDRAW_COOLDOWN_MS) {
+      const remaining = Math.ceil((PlayService.WITHDRAW_COOLDOWN_MS - (Date.now() - lastWithdraw)) / 1000);
+      throw new BadRequestException(`Please wait ${remaining}s before withdrawing again.`);
+    }
+  }
+
   async withdraw(userId: string, amount: number, to: string, token: string = 'USDC') {
+    this.checkWithdrawCooldown(userId);
     const user = await this.userModel.findById(userId).select('+walletPrivateKey');
     if (!user) throw new NotFoundException('User not found');
 
@@ -346,6 +357,7 @@ export class PlayService {
     const privKey = decrypt(user.walletPrivateKey);
     const txHash = await this.settlementRouter.transferTokenFromAgent(chain, privKey, to, amountWei, token);
 
+    this.withdrawCooldowns.set(userId, Date.now());
     this.logger.log(`Withdraw: user=${userId}, amount=${amount} ${token}, to=${to}, txHash=${txHash}`);
     return { txHash, amount, to, token, chain };
   }
@@ -355,6 +367,7 @@ export class PlayService {
    * Platform signs as fee payer, user signs with their wallet on the frontend.
    */
   async buildWithdraw(userId: string, amount: number, to: string, token: string = 'USDC') {
+    this.checkWithdrawCooldown(userId);
     const user = await this.userModel.findById(userId);
     if (!user) throw new NotFoundException('User not found');
 
@@ -384,6 +397,7 @@ export class PlayService {
       throw new BadRequestException('Failed to build transaction. Settlement service may not be configured.');
     }
 
+    this.withdrawCooldowns.set(userId, Date.now());
     this.logger.log(`Built withdraw tx: user=${userId}, amount=${amount} ${token}, to=${to}`);
     return { transaction: result.transaction, blockhash: result.blockhash, amount, to, token, chain };
   }
