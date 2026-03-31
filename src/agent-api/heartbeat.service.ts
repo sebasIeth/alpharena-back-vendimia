@@ -37,8 +37,11 @@ export class HeartbeatService {
     for (const [matchId, state] of this.activeMatches.entries()) {
       for (const side of Object.keys(state.agents)) {
         if (state.agents[side].agentId === agentId) {
-          // Agent is in this match
-          const pendingAgentId = this.humanMoveService.getPendingAgentId(matchId);
+          // Agent is in this match — check both standard key and RPS per-side key
+          let pendingAgentId = this.humanMoveService.getPendingAgentId(matchId);
+          if (!pendingAgentId) {
+            pendingAgentId = this.humanMoveService.getPendingAgentId(`${matchId}:${side}`);
+          }
           if (pendingAgentId === agentId) {
             dueGameIds.push(matchId);
             shouldMoveNow = true;
@@ -48,14 +51,26 @@ export class HeartbeatService {
       }
     }
 
+    // Find any active match this agent is in (even if not their turn yet)
+    let activeMatchId: string | null = null;
+    for (const [matchId, state] of this.activeMatches.entries()) {
+      for (const side of Object.keys(state.agents)) {
+        if (state.agents[side].agentId === agentId) {
+          activeMatchId = matchId;
+          break;
+        }
+      }
+      if (activeMatchId) break;
+    }
+
     // Should the agent queue up? Only if idle AND not in any active match
-    const shouldQueueNow = agent.status === 'idle' && dueGameIds.length === 0;
+    const shouldQueueNow = agent.status === 'idle' && !activeMatchId && dueGameIds.length === 0;
 
     // Recommended heartbeat cadence (matches Clawleague style)
     let recommendedHeartbeatSeconds: number;
     if (shouldMoveNow) {
       recommendedHeartbeatSeconds = MOVE_HEARTBEAT_SECONDS;
-    } else if (agent.status === 'in_match') {
+    } else if (agent.status === 'in_match' || activeMatchId) {
       recommendedHeartbeatSeconds = IN_MATCH_HEARTBEAT_SECONDS;
     } else if (agent.status === 'queued') {
       recommendedHeartbeatSeconds = QUEUED_HEARTBEAT_SECONDS;
@@ -68,6 +83,7 @@ export class HeartbeatService {
       status: agent.status,
       shouldQueueNow,
       shouldMoveNow,
+      activeMatchId,
       nextMatchId: dueGameIds[0] ?? null,
       dueGameIds,
       recommendedHeartbeatSeconds,
