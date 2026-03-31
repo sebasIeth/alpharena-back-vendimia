@@ -9,6 +9,9 @@ function getKey(): Buffer {
   if (!key || key.length !== 64) {
     throw new Error('ENCRYPTION_KEY must be a 64-char hex string (32 bytes)');
   }
+  if (!/^[0-9a-fA-F]{64}$/.test(key)) {
+    throw new Error('ENCRYPTION_KEY must be a valid hex string');
+  }
   return Buffer.from(key, 'hex');
 }
 
@@ -25,10 +28,12 @@ export function encrypt(plaintext: string): string {
 /** Decrypt "iv:authTag:ciphertext" → plaintext */
 export function decrypt(encoded: string): string {
   const parts = encoded.split(':');
-  if (parts.length !== 3) return encoded; // not encrypted (legacy plain-text token)
+  if (parts.length !== 3) {
+    throw new Error('Invalid encrypted format: expected iv:authTag:ciphertext');
+  }
   const [ivHex, authTagHex, ciphertextHex] = parts;
   if (ivHex.length !== IV_LENGTH * 2 || authTagHex.length !== AUTH_TAG_LENGTH * 2) {
-    return encoded; // not our format, return as-is
+    throw new Error('Invalid encrypted format: wrong IV or auth tag length');
   }
   const key = getKey();
   const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, 'hex'));

@@ -93,7 +93,27 @@ export class AuthService {
     };
   }
 
-  async registerWithWallet(walletAddress: string, signature: string) {
+  /** Get a nonce for wallet registration (no auth required, stored temporarily in DB) */
+  async getWalletRegisterNonce(walletAddress: string) {
+    const nonce = crypto.randomBytes(32).toString('hex');
+    const message = `Sign this message to register on AlphArena: ${nonce}`;
+
+    // Store nonce temporarily (5 min TTL)
+    await this.userModel.db.collection('wallet_nonces').updateOne(
+      { walletAddress },
+      { $set: { walletAddress, nonce, message, createdAt: new Date() } },
+      { upsert: true },
+    );
+    // TTL index ensures auto-cleanup (created on first call)
+    await this.userModel.db.collection('wallet_nonces').createIndex(
+      { createdAt: 1 },
+      { expireAfterSeconds: 300 },
+    ).catch(() => {}); // Ignore if already exists
+
+    return { nonce, message };
+  }
+
+  async registerWithWallet(walletAddress: string, signature: string, nonce: string) {
     // Validate wallet address
     let publicKey: PublicKey;
     try {
@@ -113,22 +133,21 @@ export class AuthService {
       throw new ConflictException('This wallet is already connected to an account');
     }
 
-    // Generate a nonce for verification (use a fixed message for registration)
-    const nonce = crypto.randomBytes(16).toString('hex');
+    // Verify nonce was issued and not expired
+    const storedNonce = await this.userModel.db.collection('wallet_nonces').findOneAndDelete({
+      walletAddress,
+      nonce,
+    });
+    if (!storedNonce) {
+      throw new BadRequestException('Invalid or expired nonce. Call GET /auth/wallet/register-nonce first.');
+    }
+
+    // Verify signature against the nonce message
     const message = `Sign this message to register on AlphArena: ${nonce}`;
     const messageBytes = new TextEncoder().encode(message);
-
-    // For registration, we accept any valid signature from the wallet
-    // Since we can't pre-store a nonce (user doesn't exist yet),
-    // we verify the signature matches the wallet's public key with a known message pattern
     const signatureBytes = bs58.default.decode(signature);
 
-    // We need to verify against the message the frontend signed.
-    // The frontend will sign: "Sign this message to register on AlphArena"
-    const registrationMessage = 'Sign this message to register on AlphArena';
-    const registrationMessageBytes = new TextEncoder().encode(registrationMessage);
-
-    const isValid = nacl.sign.detached.verify(registrationMessageBytes, signatureBytes, publicKey.toBytes());
+    const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
     if (!isValid) {
       throw new BadRequestException('Invalid wallet signature');
     }
@@ -203,7 +222,21 @@ export class AuthService {
     };
   }
 
-  async loginWithWallet(walletAddress: string, signature: string) {
+  /** Get a nonce for wallet login (no auth required) */
+  async getWalletLoginNonce(walletAddress: string) {
+    const nonce = crypto.randomBytes(32).toString('hex');
+    const message = `Sign this message to log in to AlphArena: ${nonce}`;
+
+    await this.userModel.db.collection('wallet_nonces').updateOne(
+      { walletAddress, type: 'login' },
+      { $set: { walletAddress, type: 'login', nonce, message, createdAt: new Date() } },
+      { upsert: true },
+    );
+
+    return { nonce, message };
+  }
+
+  async loginWithWallet(walletAddress: string, signature: string, nonce: string) {
     let publicKey: PublicKey;
     try {
       publicKey = new PublicKey(walletAddress);
@@ -217,9 +250,19 @@ export class AuthService {
       throw new UnauthorizedException('No account found for this wallet. Please register first.');
     }
 
-    // Verify signature
-    const loginMessage = 'Sign this message to log in to AlphArena';
-    const messageBytes = new TextEncoder().encode(loginMessage);
+    // Verify nonce
+    const storedNonce = await this.userModel.db.collection('wallet_nonces').findOneAndDelete({
+      walletAddress,
+      type: 'login',
+      nonce,
+    });
+    if (!storedNonce) {
+      throw new BadRequestException('Invalid or expired nonce. Call GET /auth/wallet/login-nonce first.');
+    }
+
+    // Verify signature against the nonce message
+    const message = `Sign this message to log in to AlphArena: ${nonce}`;
+    const messageBytes = new TextEncoder().encode(message);
     const signatureBytes = bs58.default.decode(signature);
 
     const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());

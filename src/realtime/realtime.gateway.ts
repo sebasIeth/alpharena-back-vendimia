@@ -36,12 +36,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   handleConnection(client: Socket): void {
-    const token = client.handshake.query.token as string | undefined;
+    // Support token in auth object (preferred) or query string (legacy)
+    const token = (client.handshake.auth?.token || client.handshake.query.token) as string | undefined;
 
     if (!token) {
       client.emit('message', {
         type: 'error',
-        data: { message: 'Authentication required. Pass ?token=<jwt> as a query parameter.' },
+        data: { message: 'Authentication required.' },
       });
       client.disconnect();
       return;

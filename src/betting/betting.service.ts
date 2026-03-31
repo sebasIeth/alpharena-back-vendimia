@@ -7,10 +7,12 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import * as crypto from 'crypto';
 import { Bet, Match, User } from '../database/schemas';
 import { EventBusService } from '../orchestrator/event-bus.service';
 import { SolanaSettlementService } from '../settlement/solana-settlement.service';
 import { X402VerifierService } from '../settlement/x402-verifier.service';
+import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { MatchEndedEvent } from '../common/types';
 
 const BETTING_FEE_PERCENT = 5;
@@ -43,6 +45,7 @@ export class BettingService implements OnModuleInit {
     private readonly eventBus: EventBusService,
     private readonly solanaSettlement: SolanaSettlementService,
     private readonly x402Verifier: X402VerifierService,
+    private readonly x402PaymentStore: X402PaymentStore,
   ) {}
 
   onModuleInit() {
@@ -89,6 +92,11 @@ export class BettingService implements OnModuleInit {
     let betTxHash: string | null = null;
 
     if (x402TxSignature) {
+      // Replay protection: check if tx was already used
+      if (this.x402PaymentStore.isTxUsed(x402TxSignature)) {
+        throw new BadRequestException('This transaction has already been used for a payment.');
+      }
+
       // x402 flow: verify on-chain payment (used by external wallets and API agents)
       const decimals = this.solanaSettlement.getTokenDecimals('USDC');
       const expectedAmount = BigInt(Math.round(amount * 10 ** decimals));
@@ -96,6 +104,9 @@ export class BettingService implements OnModuleInit {
       if (!verification.valid) {
         throw new BadRequestException(`Payment verification failed: ${verification.error}`);
       }
+
+      // Mark tx as used to prevent replay
+      this.x402PaymentStore.markTxUsed(x402TxSignature);
       betTxHash = x402TxSignature;
     } else if (isExternal) {
       // External wallet without x402 tx — they must pre-sign
@@ -322,10 +333,22 @@ export class BettingService implements OnModuleInit {
       throw new BadRequestException('Match is not yet settled');
     }
 
+    // Atomic claim: mark as claimed FIRST to prevent double-claim race condition
+    const claimTag = `claim-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const claimResult = await this.betModel.updateMany(
+      { matchId, userId: new Types.ObjectId(userId), claimed: false },
+      { claimed: true, claimTag },
+    );
+
+    if (claimResult.modifiedCount === 0) {
+      throw new BadRequestException('No unclaimed bets found');
+    }
+
+    // Fetch the bets we just claimed
     const userBets = await this.betModel.find({
       matchId,
       userId: new Types.ObjectId(userId),
-      claimed: false,
+      claimTag,
     });
 
     if (userBets.length === 0) {
@@ -389,9 +412,10 @@ export class BettingService implements OnModuleInit {
       }
     }
 
+    // Update with tx hashes (already marked claimed atomically above)
     await this.betModel.updateMany(
-      { matchId, userId: new Types.ObjectId(userId), claimed: false },
-      { claimed: true, claimTxHash: txHash, feeTxHash },
+      { matchId, userId: new Types.ObjectId(userId), claimTag },
+      { claimTxHash: txHash, feeTxHash },
     );
 
     this.logger.log(`Bet claimed: user=${userId}, match=${matchId}, payout=${payout}, txHash=${txHash}, feeTxHash=${feeTxHash}`);

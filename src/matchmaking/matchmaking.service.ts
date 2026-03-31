@@ -178,11 +178,14 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
 
   async leaveQueue(agentId: string): Promise<void> {
     const entry = await this.queue.get(agentId);
+    if (entry?.status === 'pairing') {
+      throw new Error('Cannot leave queue while being matched. Try again shortly.');
+    }
     await this.queue.remove(agentId);
     this.logger.log(`Agent ${agentId} left matchmaking queue`);
 
-    // Refund stake if agent had pre-paid
-    if (entry && entry.stakeAmount > 0) {
+    // Refund stake if agent had pre-paid and was still waiting
+    if (entry && entry.status === 'waiting' && entry.stakeAmount > 0) {
       await this.refundStake(entry);
     }
   }

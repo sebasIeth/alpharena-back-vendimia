@@ -7,7 +7,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SendVerificationCodeDto } from './dto/send-verification-code.dto';
 import { VerifyCodeDto } from './dto/verify-code.dto';
 import { ConnectWalletDto, SwitchWalletDto } from './dto/connect-wallet.dto';
-import { RegisterWalletDto } from './dto/register-wallet.dto';
+import { RegisterWalletDto, WalletNonceDto } from './dto/register-wallet.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthPayload } from '../common/types';
@@ -28,15 +28,27 @@ export class AuthController {
     return this.authService.login(dto);
   }
 
+  @Post('wallet/register-nonce')
+  @HttpCode(200)
+  async getWalletRegisterNonce(@Body() dto: WalletNonceDto) {
+    return this.authService.getWalletRegisterNonce(dto.walletAddress);
+  }
+
   @Post('register-wallet')
   async registerWithWallet(@Body() dto: RegisterWalletDto) {
-    return this.authService.registerWithWallet(dto.walletAddress, dto.signature);
+    return this.authService.registerWithWallet(dto.walletAddress, dto.signature, dto.nonce);
+  }
+
+  @Post('wallet/login-nonce')
+  @HttpCode(200)
+  async getWalletLoginNonce(@Body() dto: WalletNonceDto) {
+    return this.authService.getWalletLoginNonce(dto.walletAddress);
   }
 
   @Post('login-wallet')
   @HttpCode(200)
   async loginWithWallet(@Body() dto: RegisterWalletDto) {
-    return this.authService.loginWithWallet(dto.walletAddress, dto.signature);
+    return this.authService.loginWithWallet(dto.walletAddress, dto.signature, dto.nonce);
   }
 
   @Post('send-verification-code')
