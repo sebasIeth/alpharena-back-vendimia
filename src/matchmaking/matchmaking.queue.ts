@@ -103,17 +103,16 @@ export class MatchmakingQueue {
     return [...types];
   }
 
-  /** Remove entries older than the given threshold and stuck 'pairing' entries.
+  /** Remove stuck 'pairing' entries only. Waiting entries stay indefinitely until matched or cancelled.
    *  Returns the removed entries so callers can issue refunds. */
   async cleanupStaleEntries(staleMs: number = 10 * 60 * 1000, pairingTimeoutMs: number = 60 * 1000): Promise<QueueEntryData[]> {
     const now = Date.now();
-    const staleThreshold = new Date(now - staleMs);
     const pairingThreshold = new Date(now - pairingTimeoutMs);
 
-    // Find entries to remove: stale waiting entries or stuck pairing entries
+    // Only remove entries stuck in 'pairing' state (indicates a failed match attempt)
+    // Waiting entries stay in queue until an opponent is found
     const toRemove = this.entries.filter(e =>
-      (e.joinedAt < staleThreshold) ||
-      (e.status === 'pairing' && e.joinedAt < pairingThreshold),
+      e.status === 'pairing' && e.joinedAt < pairingThreshold,
     );
 
     if (toRemove.length === 0) return [];
