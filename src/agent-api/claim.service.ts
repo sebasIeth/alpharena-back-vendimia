@@ -20,7 +20,7 @@ export class ClaimService {
 
     return {
       claimToken,
-      agentId: (agent as any)._id.toString(),
+      agentId: agent._id.toString(),
       agentName: agent.name,
       apiKeyPrefix: agent.apiKeyPrefix,
       claimStatus: agent.claimStatus,
@@ -43,9 +43,9 @@ export class ClaimService {
 
     agent.xVerificationChallenge = challengeText;
     agent.claimStatus = 'pending';
-    await (agent as any).save();
+    await agent.save();
 
-    this.logger.log(`Generated X verification challenge for agent ${(agent as any)._id}`);
+    this.logger.log(`Generated X verification challenge for agent ${agent._id}`);
 
     return {
       challengeText,
@@ -99,19 +99,19 @@ export class ClaimService {
       agent.claimStatus = 'claimed';
       agent.xUsername = xUsername;
       agent.xVerificationPostUrl = tweetUrl;
-      await (agent as any).save();
+      await agent.save();
 
-      this.logger.log(`Agent ${(agent as any)._id} claimed by X user @${xUsername}`);
+      this.logger.log(`Agent ${agent._id} claimed by X user @${xUsername}`);
 
       return {
         success: true,
-        agentId: (agent as any)._id.toString(),
+        agentId: agent._id.toString(),
         xUsername,
         claimStatus: 'claimed',
       };
     } catch (err) {
       if (err instanceof BadRequestException) throw err;
-      this.logger.error(`X verification failed for agent ${(agent as any)._id}: ${err}`);
+      this.logger.error(`X verification failed for agent ${agent._id}: ${err}`);
       throw new BadRequestException('Verification failed. Could not verify tweet content.');
     }
   }

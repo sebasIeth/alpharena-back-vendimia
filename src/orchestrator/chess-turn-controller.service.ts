@@ -111,8 +111,7 @@ export class ChessTurnControllerService {
       } else if (agent.type === 'openclaw') {
         response = await this.agentClient.requestChessMoveFromOpenClaw(agent, moveRequest, { side: currentSide, agentId: agent.agentId });
       } else {
-        const raw = await this.agentClient.requestMove(agent.endpointUrl, moveRequest as any);
-        response = raw as any;
+        response = (await this.agentClient.requestMove(agent.endpointUrl, moveRequest as unknown as Record<string, unknown>)) as { move: string };
       }
 
       if (matchState.clock) matchState.clock.clearTurn();

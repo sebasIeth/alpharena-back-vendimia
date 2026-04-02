@@ -97,7 +97,7 @@ export class AgentApiPublicController {
   async getMatchDetail(@Param('matchId') matchId: string) {
     const match = await this.matchModel.findById(matchId)
       .select('-__v')
-      .lean() as any;
+      .lean();
 
     if (!match) {
       throw new NotFoundException('Match not found');

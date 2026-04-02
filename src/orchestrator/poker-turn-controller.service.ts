@@ -183,8 +183,7 @@ export class PokerTurnControllerService {
               agent, moveRequest, { side: currentSide, agentId: agent.agentId },
             );
           } else {
-            const raw = await this.agentClient.requestMove(agent.endpointUrl, moveRequest as any);
-            actionResponse = raw as any;
+            actionResponse = (await this.agentClient.requestMove(agent.endpointUrl, moveRequest as unknown as Record<string, unknown>)) as unknown as PokerMoveResponse;
           }
 
           if (matchState.clock) matchState.clock.clearTurn();

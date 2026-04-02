@@ -1,6 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Socket } from 'socket.io';
 
+interface AuthenticatedSocket extends Socket {
+  user?: { userId: string; username: string };
+  role?: string;
+}
+
 @Injectable()
 export class RoomsService {
   private readonly logger = new Logger(RoomsService.name);
@@ -86,8 +91,8 @@ export class RoomsService {
     // Deduplicate by userId, only count spectators (exclude players from /play page)
     const uniqueSpectators = new Set<string>();
     for (const client of room) {
-      if ((client as any).role === 'player') continue;
-      const userId = (client as any).user?.userId;
+      if ((client as AuthenticatedSocket).role === 'player') continue;
+      const userId = (client as AuthenticatedSocket).user?.userId;
       if (userId) uniqueSpectators.add(userId);
     }
     return uniqueSpectators.size;

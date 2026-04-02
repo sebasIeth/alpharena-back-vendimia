@@ -21,13 +21,13 @@ export class AgentClientService {
     this.timeoutMs = TURN_TIMEOUT_MS;
   }
 
-  async requestMove(endpointUrl: string, moveRequest: MoveRequest): Promise<MoveResponse> {
+  async requestMove(endpointUrl: string, moveRequest: Record<string, unknown>): Promise<Record<string, unknown>> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
     const startTime = Date.now();
 
     this.logger.log(
-      `Requesting move from agent at ${endpointUrl} (match: ${moveRequest.matchId}, move #${moveRequest.moveNumber})`,
+      `Requesting move from agent at ${endpointUrl} (match: ${moveRequest.matchId ?? '?'}, move #${moveRequest.moveNumber ?? '?'})`,
     );
 
     try {
@@ -48,8 +48,8 @@ export class AgentClientService {
         throw new Error(`Agent returned HTTP ${response.status}: ${body}`);
       }
 
-      const data = (await response.json()) as MoveResponse;
-      this.logger.log(`Agent responded with move [${data.move}] (${elapsed}ms)`);
+      const data = (await response.json()) as Record<string, unknown>;
+      this.logger.log(`Agent responded with move [${JSON.stringify(data.move ?? data.action ?? '?')}] (${elapsed}ms)`);
       return data;
     } catch (error: unknown) {
       const elapsed = Date.now() - startTime;

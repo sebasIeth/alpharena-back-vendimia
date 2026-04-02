@@ -38,12 +38,12 @@ export class ScheduledMatchesService {
     }
 
     // Validate game type support and chain consistency
-    const matchChain = (agents[0] as any).chain || 'base';
+    const matchChain = agents[0].chain || 'base';
     for (const agent of agents) {
       if (!agent.gameTypes.includes(dto.gameType)) {
         throw new BadRequestException(`Agent "${agent.name}" does not support game type "${dto.gameType}"`);
       }
-      const agentChain = (agent as any).chain || 'base';
+      const agentChain = agent.chain || 'base';
       if (agentChain !== matchChain) {
         throw new BadRequestException(
           `Chain mismatch: agent "${agent.name}" is on "${agentChain}" but other agents are on "${matchChain}"`,

@@ -94,7 +94,7 @@ export class TurnControllerService {
       } else if (agent.type === 'openclaw') {
         response = await this.agentClient.requestReversiMoveFromOpenClaw(agent, moveRequest, { side: currentSide, agentId: agent.agentId });
       } else {
-        response = await this.agentClient.requestMove(agent.endpointUrl, moveRequest);
+        response = (await this.agentClient.requestMove(agent.endpointUrl, moveRequest as unknown as Record<string, unknown>)) as { move: [number, number] };
       }
 
       if (matchState.clock) matchState.clock.clearTurn();

@@ -27,7 +27,7 @@ export class ScheduledMatchJob {
     this.logger.log(`Found ${dueMatches.length} scheduled match(es) due for execution`);
 
     for (const scheduled of dueMatches) {
-      const id = (scheduled as any)._id.toString();
+      const id = scheduled._id.toString();
       try {
         // Mark as starting to prevent double-execution
         await this.scheduledMatchModel.updateOne({ _id: id }, { status: 'starting' });
@@ -63,8 +63,8 @@ export class ScheduledMatchJob {
         }
 
         // Validate both agents are on the same chain
-        const chainA = (agentA as any).chain || 'base';
-        const chainB = (agentB as any).chain || 'base';
+        const chainA = agentA.chain || 'base';
+        const chainB = agentB.chain || 'base';
         if (chainA !== chainB) {
           this.logger.warn(`Scheduled match ${id}: chain mismatch (${agentA.name}=${chainA}, ${agentB.name}=${chainB})`);
           await this.scheduledMatchModel.updateOne({ _id: id }, { status: 'cancelled', cancelReason: `Chain mismatch: ${chainA} vs ${chainB}` });

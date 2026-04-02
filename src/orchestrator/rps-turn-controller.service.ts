@@ -6,6 +6,8 @@ import { MoveDoc, Match } from '../database/schemas';
 import { RPS_BEST_OF, RPS_VALID_THROWS, RpsThrow } from '../common/constants/game.constants';
 import { ActiveMatchesService, ActiveMatchState } from './active-matches.service';
 import { AgentClientService } from './agent-client.service';
+import { Agent } from '../database/schemas';
+import { ChessMoveRequest } from '../common/types/chess.types';
 import { EventBusService } from './event-bus.service';
 import { HumanMoveService } from './human-move.service';
 
@@ -200,11 +202,11 @@ export class RpsTurnControllerService {
         });
         response = await this.humanMoveService.waitForMove(matchId + ':' + side, side, agent.agentId, 70000);
       } else if (agent.type === 'openclaw') {
-        const raw = await this.agentClient.requestChessMoveFromOpenClaw(agent as any, moveRequest as any, { side, agentId: agent.agentId });
+        const raw = await this.agentClient.requestChessMoveFromOpenClaw(agent as unknown as Agent, moveRequest as unknown as ChessMoveRequest, { side, agentId: agent.agentId });
         response = raw;
       } else {
         // HTTP agent
-        response = await this.agentClient.requestMove(agent.endpointUrl, moveRequest as any);
+        response = await this.agentClient.requestMove(agent.endpointUrl, moveRequest as unknown as Record<string, unknown>);
       }
 
       const throwStr = this.parseThrow(response);

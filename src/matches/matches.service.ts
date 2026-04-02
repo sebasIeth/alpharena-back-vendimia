@@ -31,8 +31,8 @@ export class MatchesService {
 
     const xMap = new Map<string, string>();
     for (const agent of agents) {
-      if ((agent as any).xUsername) {
-        xMap.set((agent as any)._id.toString(), (agent as any).xUsername);
+      if (agent.xUsername) {
+        xMap.set(agent._id.toString(), agent.xUsername);
       }
     }
 

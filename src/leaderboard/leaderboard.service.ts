@@ -165,8 +165,8 @@ export class LeaderboardService {
     const ranked = filteredStats.map((entry: any, index: number) => {
       const user = userMap.get(entry._id.toString());
       return {
-        rank: index + 1, userId: entry._id, username: (user as any)?.username ?? 'Unknown',
-        walletAddress: (user as any)?.walletAddress ?? '', totalEarnings: entry.totalEarnings,
+        rank: index + 1, userId: entry._id, username: (user as Record<string, string>)?.username ?? 'Unknown',
+        walletAddress: (user as Record<string, string>)?.walletAddress ?? '', totalEarnings: entry.totalEarnings,
         earningsAlpha: entry.earningsAlpha || 0, earningsUsdc: entry.earningsUsdc || 0,
         totalWins: entry.totalWins, totalLosses: entry.totalLosses, totalDraws: entry.totalDraws,
         totalMatches: entry.totalMatches, agentCount: entry.agentCount, bestElo: entry.bestElo,
@@ -177,7 +177,7 @@ export class LeaderboardService {
   }
 
   async getAgentStats(id: string) {
-    const agent = await this.agentModel.findById(id).select('name eloRating stats gameTypes userId status createdAt xUsername claimStatus').lean() as any;
+    const agent = await this.agentModel.findById(id).select('name eloRating stats gameTypes userId status createdAt xUsername claimStatus').lean();
     if (!agent) throw new NotFoundException('Agent not found');
 
     const recentMatches = await this.matchModel.find({
@@ -204,7 +204,7 @@ export class LeaderboardService {
       };
     });
 
-    const owner = await this.userModel.findById(agent.userId).select('username').lean() as any;
+    const owner = await this.userModel.findById(agent.userId).select('username').lean();
 
     // Aggregate wins/losses/draws per game type
     // Match on both string and ObjectId variants of agentId

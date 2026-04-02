@@ -7,6 +7,7 @@ import { Agent } from '../database/schemas';
 import { AgentApiService } from './agent-api.service';
 import { HeartbeatService } from './heartbeat.service';
 import { BatchRegisterDto, BatchHeartbeatDto, BatchMoveDto } from './dto/batch.dto';
+import { SubmitMoveDto } from './dto/move.dto';
 
 @Controller('v1/batch')
 @SkipThrottle()
@@ -72,7 +73,7 @@ export class AgentApiBatchController {
           amount: entry.amount,
         };
 
-        await this.agentApiService.submitMove(agent, entry.matchId, moveDto as any);
+        await this.agentApiService.submitMove(agent, entry.matchId, moveDto as SubmitMoveDto);
         results.push({ success: true, matchId: entry.matchId });
       } catch (err) {
         results.push({

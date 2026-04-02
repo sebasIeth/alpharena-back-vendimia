@@ -186,10 +186,10 @@ export class MarrakechTurnControllerService {
           gameType: 'marrakech',
           board,
           legalMoves: phase === 'orient'
-            ? (validActions as any).directions
+            ? (validActions as Record<string, unknown>).directions as unknown[]
             : phase === 'place'
               ? state.validPlacements
-              : (validActions as any).borderOptions,
+              : (validActions as Record<string, unknown>).borderOptions as unknown[],
           moveNumber: state.turnNumber,
           timeRemainingMs: matchState.clock ? matchState.clock.getTimeRemainingMs() : 30_000,
           turnTimeoutMs: TURN_TIMEOUT_MS,
@@ -232,7 +232,7 @@ export class MarrakechTurnControllerService {
 
     try {
       const response = await this.agentClient.requestMove(
-        endpointUrl, request as unknown as any,
+        endpointUrl, request as unknown as Record<string, unknown>,
       );
       if (matchState.clock) matchState.clock.clearTurn();
       return response as unknown as MarrakechMoveResponse;
