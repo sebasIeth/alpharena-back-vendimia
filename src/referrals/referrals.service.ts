@@ -57,7 +57,7 @@ export class ReferralsService {
     this.logger.log(`Referral registered: ${referrerCode} -> user ${referredUserId}`);
   }
 
-  async getReferralStats(userId: string, username: string) {
+  async getReferralStats(userId: string, username: string, paymentsLimit = 50) {
     const referralCode = this.getReferralCode(userId, username);
     const referralLink = `${this.configService.frontendUrl}?ref=${referralCode}`;
 
@@ -81,7 +81,7 @@ export class ReferralsService {
         referralId: { $in: referrals.map((r) => r._id) },
       })
       .sort({ createdAt: -1 })
-      .limit(20);
+      .limit(paymentsLimit);
 
     const totalEarned = referrals.reduce((sum, r) => sum + r.totalEarned, 0);
 

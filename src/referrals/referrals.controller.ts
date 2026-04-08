@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, UseGuards, Req, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { ConfigService } from '../common/config/config.service';
 import { ReferralsService } from './referrals.service';
@@ -12,8 +12,12 @@ export class ReferralsController {
   ) {}
 
   @Get('me')
-  async getMyStats(@Req() req: any) {
-    return this.referralsService.getReferralStats(req.user.userId, req.user.username);
+  async getMyStats(
+    @Req() req: any,
+    @Query('paymentsLimit') paymentsLimit?: string,
+  ) {
+    const limit = paymentsLimit ? Math.min(Math.max(parseInt(paymentsLimit, 10) || 50, 1), 200) : 50;
+    return this.referralsService.getReferralStats(req.user.userId, req.user.username, limit);
   }
 
   @Get('code')
