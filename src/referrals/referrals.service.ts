@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { REFERRAL_FEE_PERCENT } from '../common/constants/game.constants';
 import { User, Referral, ReferralPayment } from '../database/schemas';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
+import { ConfigService } from '../common/config/config.service';
 
 @Injectable()
 export class ReferralsService {
@@ -14,13 +15,24 @@ export class ReferralsService {
     @InjectModel(Referral.name) private readonly referralModel: Model<Referral>,
     @InjectModel(ReferralPayment.name) private readonly referralPaymentModel: Model<ReferralPayment>,
     private readonly settlementRouter: SettlementRouterService,
+    private readonly configService: ConfigService,
   ) {}
 
   getReferralCode(userId: string, username: string): string {
     return username;
   }
 
-  async registerReferral(referredUserId: string, referrerCode: string): Promise<void> {
+  async registerReferral(referredUserId: string, rawCode: string): Promise<void> {
+    // Support pasting full referral URL — extract the code from ?ref= param
+    let referrerCode = rawCode;
+    try {
+      const url = new URL(rawCode);
+      const ref = url.searchParams.get('ref');
+      if (ref) referrerCode = ref;
+    } catch {
+      // Not a URL, use as-is
+    }
+
     const existing = await this.referralModel.findOne({ referredId: referredUserId });
     if (existing) {
       throw new BadRequestException('You already have a referrer registered');
@@ -47,7 +59,7 @@ export class ReferralsService {
 
   async getReferralStats(userId: string, username: string) {
     const referralCode = this.getReferralCode(userId, username);
-    const referralLink = `https://app.alpharena.ai?ref=${referralCode}`;
+    const referralLink = `${this.configService.frontendUrl}?ref=${referralCode}`;
 
     const referrals = await this.referralModel.find({ referrerId: new Types.ObjectId(userId) }).sort({ createdAt: -1 });
 

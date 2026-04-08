@@ -94,8 +94,7 @@ export class PlayService {
         }
 
         if (!user.walletPrivateKey) throw new BadRequestException('Wallet not configured');
-        const { decrypt } = require('../common/crypto.util');
-        const privKey = decrypt(user.walletPrivateKey);
+        const privKey = user.walletPrivateKey; // already decrypted by schema getter
         const decimals = this.settlementRouter.getTokenDecimals(chain, matchToken);
         const amountAtomic = BigInt(Math.round(stakeAmount * 10 ** decimals));
         const platformWallet = this.settlementRouter.getPlatformWalletAddress(chain);
@@ -353,8 +352,7 @@ export class PlayService {
 
     const decimals = this.settlementRouter.getTokenDecimals(chain, token);
     const amountWei = BigInt(Math.round(amount * 10 ** decimals));
-    const { decrypt } = require('../common/crypto.util');
-    const privKey = decrypt(user.walletPrivateKey);
+    const privKey = user.walletPrivateKey; // already decrypted by schema getter
     const txHash = await this.settlementRouter.transferTokenFromAgent(chain, privKey, to, amountWei, token);
 
     this.withdrawCooldowns.set(userId, Date.now());

@@ -1,11 +1,15 @@
 import { Controller, Get, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { ConfigService } from '../common/config/config.service';
 import { ReferralsService } from './referrals.service';
 
 @Controller('v1/referrals')
 @UseGuards(JwtAuthGuard)
 export class ReferralsController {
-  constructor(private readonly referralsService: ReferralsService) {}
+  constructor(
+    private readonly referralsService: ReferralsService,
+    private readonly configService: ConfigService,
+  ) {}
 
   @Get('me')
   async getMyStats(@Req() req: any) {
@@ -17,7 +21,7 @@ export class ReferralsController {
     const code = this.referralsService.getReferralCode(req.user.userId, req.user.username);
     return {
       referralCode: code,
-      referralLink: `https://app.alpharena.ai?ref=${code}`,
+      referralLink: `${this.configService.frontendUrl}?ref=${code}`,
     };
   }
 
