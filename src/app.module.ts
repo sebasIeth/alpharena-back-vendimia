@@ -21,6 +21,7 @@ import { MailModule } from './mail/mail.module';
 import { ScheduledMatchesModule } from './scheduled-matches/scheduled-matches.module';
 import { BettingModule } from './betting/betting.module';
 import { AgentApiModule } from './agent-api/agent-api.module';
+import { ReferralsModule } from './referrals/referrals.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -56,6 +57,7 @@ import { HealthController } from './health.controller';
     ScheduledMatchesModule,
     BettingModule,
     AgentApiModule,
+    ReferralsModule,
     WorkerModule,
     GameEngineModule,
   ],

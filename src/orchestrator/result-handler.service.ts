@@ -7,6 +7,7 @@ import { Match, Agent } from '../database/schemas';
 import { ActiveMatchesService, ActiveMatchState } from './active-matches.service';
 import { EventBusService } from './event-bus.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
+import { ReferralsService } from '../referrals/referrals.service';
 
 const ELO_K = 32;
 
@@ -43,6 +44,7 @@ export class ResultHandlerService {
     private readonly activeMatches: ActiveMatchesService,
     private readonly eventBus: EventBusService,
     private readonly settlementRouter: SettlementRouterService,
+    private readonly referralsService: ReferralsService,
   ) {}
 
   async handleMatchEnd(
@@ -122,6 +124,27 @@ export class ResultHandlerService {
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         this.logger.error(`Settlement failed for match ${matchId}: ${message}`);
+      }
+      // Process referral payments (non-blocking)
+      const feeAmountHuman = matchDoc.potAmount * (PLATFORM_FEE_PERCENT / 100);
+      if (feeAmountHuman > 0) {
+        for (const agent of Object.values(matchState.agents)) {
+          try {
+            const agentDoc = await this.agentModel.findById(agent.agentId);
+            if (agentDoc?.userId) {
+              await this.referralsService.processReferralPayment(
+                matchId,
+                agentDoc.userId.toString(),
+                feeAmountHuman,
+                matchToken,
+                matchChain,
+              );
+            }
+          } catch (refErr: unknown) {
+            const msg = refErr instanceof Error ? refErr.message : String(refErr);
+            this.logger.error(`Referral payment failed for agent ${agent.agentId} in match ${matchId}: ${msg}`);
+          }
+        }
       }
     } else {
       this.logger.log(`Skipping settlement for zero-stake match ${matchId}`);

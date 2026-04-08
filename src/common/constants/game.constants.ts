@@ -6,6 +6,7 @@ const isProd = process.env.NODE_ENV === 'production';
 export const MIN_STAKE = 0;
 export const MAX_STAKE = 1_000_000;
 export const PLATFORM_FEE_PERCENT = 5;
+export const REFERRAL_FEE_PERCENT = 20; // % of platform fee that goes to referrer
 export const MATCHMAKING_INTERVAL_MS = 2_000;
 export const MATCHMAKING_COUNTDOWN_MS = 30_000;
 export const ELO_MATCH_RANGE = 200;

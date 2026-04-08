@@ -3,6 +3,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { Match, MatchSchema, Agent, AgentSchema, MoveDoc, MoveSchema } from '../database/schemas';
 import { GameEngineModule } from '../game-engine/game-engine.module';
 import { SettlementModule } from '../settlement/settlement.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 import { OrchestratorService } from './orchestrator.service';
 import { MatchManagerService } from './match-manager.service';
 import { TurnControllerService } from './turn-controller.service';
@@ -26,6 +27,7 @@ import { HumanMoveService } from './human-move.service';
     ]),
     GameEngineModule,
     forwardRef(() => SettlementModule),
+    ReferralsModule,
   ],
   providers: [
     EventBusService,
