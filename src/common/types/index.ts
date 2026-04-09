@@ -6,3 +6,4 @@ export * from './events.types';
 export * from './marrakech.types';
 export * from './chess.types';
 export * from './poker.types';
+export * from './uno.types';

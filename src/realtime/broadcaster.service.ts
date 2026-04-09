@@ -90,6 +90,18 @@ export class BroadcasterService implements OnModuleInit, OnModuleDestroy {
       if (data.rpsPhase) payload.rpsPhase = data.rpsPhase;
       if (data.rpsScores) payload.rpsScores = data.rpsScores;
       if (data.rpsResult) payload.rpsResult = data.rpsResult;
+      // UNO-specific fields
+      if (data.unoAction) payload.unoAction = data.unoAction;
+      if (data.unoPhase) payload.unoPhase = data.unoPhase;
+      if (data.topCard) payload.topCard = data.topCard;
+      if (data.currentColor) payload.currentColor = data.currentColor;
+      if (data.currentTurn) payload.currentTurn = data.currentTurn;
+      if (data.drawPileCount != null) payload.drawPileCount = data.drawPileCount;
+      if (data.handCounts) payload.handCounts = data.handCounts;
+      if (data.status) payload.status = data.status;
+      if (data.winner !== undefined) payload.winner = data.winner;
+      if (data.lastAction) payload.lastAction = data.lastAction;
+      if (data.direction != null) payload.direction = data.direction;
       this.rooms.broadcast(data.matchId, { type: 'match:move', data: payload });
     };
 
@@ -181,6 +193,15 @@ export class BroadcasterService implements OnModuleInit, OnModuleDestroy {
       if (data.rpsTotalRounds != null) ytPayload.rpsTotalRounds = data.rpsTotalRounds;
       if (data.rpsPhase) ytPayload.rpsPhase = data.rpsPhase;
       if (data.rpsScores) ytPayload.rpsScores = data.rpsScores;
+      // UNO-specific
+      if (data.hand) ytPayload.hand = data.hand;
+      if (data.legalActions) ytPayload.legalActions = data.legalActions;
+      if (data.topCard) ytPayload.topCard = data.topCard;
+      if (data.currentColor) ytPayload.currentColor = data.currentColor;
+      if (data.currentTurn) ytPayload.currentTurn = data.currentTurn;
+      if (data.drawPileCount != null) ytPayload.drawPileCount = data.drawPileCount;
+      if (data.handCounts) ytPayload.handCounts = data.handCounts;
+      if (data.opponentCardCount != null) ytPayload.opponentCardCount = data.opponentCardCount;
       this.rooms.broadcast(data.matchId, { type: 'match:your_turn', data: ytPayload });
     };
 

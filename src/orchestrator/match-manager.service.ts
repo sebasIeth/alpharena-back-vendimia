@@ -22,6 +22,9 @@ import { ChessTurnControllerService } from './chess-turn-controller.service';
 import { PokerTurnControllerService } from './poker-turn-controller.service';
 import { RpsTurnControllerService } from './rps-turn-controller.service';
 import { createRpsInitialState, RpsGameState } from './rps-turn-controller.service';
+import { UnoTurnControllerService } from './uno-turn-controller.service';
+import { createInitialState as createUnoInitialState } from '../game-engine/uno';
+import { UnoGameState } from '../common/types/uno.types';
 import { createInitialState as createPokerInitialState, isMatchOver as isPokerMatchOver } from '../game-engine/poker';
 import { ResultHandlerService } from './result-handler.service';
 import { EventBusService } from './event-bus.service';
@@ -56,6 +59,7 @@ export class MatchManagerService {
   private readonly chessMoveHistories = new Map<string, ChessUciMove[]>();
   private readonly pokerStates = new Map<string, PokerGameState>();
   private readonly rpsStates = new Map<string, RpsGameState>();
+  private readonly unoStates = new Map<string, UnoGameState>();
   private readonly matchGameTypes = new Map<string, string>();
 
   constructor(
@@ -67,6 +71,7 @@ export class MatchManagerService {
     private readonly chessTurnController: ChessTurnControllerService,
     private readonly pokerTurnController: PokerTurnControllerService,
     private readonly rpsTurnController: RpsTurnControllerService,
+    private readonly unoTurnController: UnoTurnControllerService,
     private readonly resultHandler: ResultHandlerService,
     private readonly eventBus: EventBusService,
     private readonly settlementRouter: SettlementRouterService,
@@ -125,7 +130,7 @@ export class MatchManagerService {
     const potAmount = stakeAmount * agents.length;
 
     // 2-player games require exactly 2 agents
-    if (gameType === 'chess' || gameType === 'marrakech' || gameType === 'reversi' || gameType === 'rps') {
+    if (gameType === 'chess' || gameType === 'marrakech' || gameType === 'reversi' || gameType === 'rps' || gameType === 'uno') {
       if (agents.length !== 2) {
         throw new Error(`Game type "${gameType}" requires exactly 2 agents, got ${agents.length}`);
       }
@@ -145,6 +150,10 @@ export class MatchManagerService {
 
     if (gameType === 'poker') {
       return this.createPokerMatch(agents, stakeAmount, potAmount, existingMatchId);
+    }
+
+    if (gameType === 'uno') {
+      return this.createUnoMatch(agents[0], agents[1], stakeAmount, potAmount, existingMatchId);
     }
 
     return this.createReversiMatch(agents[0], agents[1], stakeAmount, potAmount, gameType, existingMatchId);
@@ -414,6 +423,68 @@ export class MatchManagerService {
     return matchId;
   }
 
+  private async createUnoMatch(
+    agentA: MatchAgentInput, agentB: MatchAgentInput,
+    stakeAmount: number, potAmount: number, existingMatchId?: string,
+  ): Promise<string> {
+    const unoState = createUnoInitialState();
+    const matchData = {
+      gameType: 'uno', chain: agentA.chain || 'solana', token: agentA.token || 'USDC',
+      agents: {
+        a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
+        b: { agentId: agentB.agentId, userId: agentB.userId, name: agentB.name, eloAtStart: agentB.eloRating },
+      },
+      stakeAmount, potAmount, status: 'starting',
+      currentBoard: [], currentTurn: unoState.currentTurn, moveCount: 0,
+      timeouts: { a: 0, b: 0 }, txHashes: { escrow: null, payout: null },
+      unoState: {
+        currentTurn: unoState.currentTurn,
+        currentColor: unoState.currentColor,
+        direction: unoState.direction,
+        status: unoState.status,
+        topCard: unoState.discardPile[unoState.discardPile.length - 1],
+        drawPileCount: unoState.drawPile.length,
+        handCounts: { a: unoState.players.a.hand.length, b: unoState.players.b.hand.length },
+      },
+    };
+    let matchId: string;
+    if (existingMatchId) {
+      await this.matchModel.findByIdAndUpdate(existingMatchId, { $set: matchData });
+      matchId = existingMatchId;
+    } else {
+      const matchDoc = await this.matchModel.create(matchData);
+      matchId = matchDoc._id.toString();
+    }
+    const compatState: GameState = {
+      board: [] as unknown as Board, currentPlayer: 'B', moveNumber: 0,
+      scores: { black: 0, white: 0 }, gameOver: false, winner: null,
+    };
+    const matchState: ActiveMatchState = {
+      matchId, gameState: compatState, clock: null, turnDeadline: 0,
+      timeouts: { a: 0, b: 0 }, status: 'starting',
+      agents: {
+        a: { agentId: agentA.agentId, endpointUrl: agentA.endpointUrl, piece: 'B', type: agentA.type, openclawUrl: agentA.openclawUrl, openclawToken: agentA.openclawToken, openclawAgentId: agentA.openclawAgentId },
+        b: { agentId: agentB.agentId, endpointUrl: agentB.endpointUrl, piece: 'W', type: agentB.type, openclawUrl: agentB.openclawUrl, openclawToken: agentB.openclawToken, openclawAgentId: agentB.openclawAgentId },
+      },
+      startedAt: Date.now(),
+    };
+    this.activeMatches.addMatch(matchState);
+    this.unoStates.set(matchId, unoState);
+    this.matchGameTypes.set(matchId, 'uno');
+    await Promise.all([
+      this.agentModel.updateOne({ _id: agentA.agentId }, { status: 'in_match' }),
+      this.agentModel.updateOne({ _id: agentB.agentId }, { status: 'in_match' }),
+    ]);
+    this.eventBus.emit('match:created', {
+      matchId, agents: {
+        a: { agentId: agentA.agentId, name: agentA.name },
+        b: { agentId: agentB.agentId, name: agentB.name },
+      }, gameType: 'uno', stakeAmount,
+    });
+    this.logger.log(`UNO match ${matchId} created`);
+    return matchId;
+  }
+
   private async createPokerMatch(
     agents: MatchAgentInput[],
     stakeAmount: number,
@@ -677,6 +748,19 @@ export class MatchManagerService {
         startedPayload.rpsScores = { a: 0, b: 0 };
       }
     }
+    if (gameType === 'uno') {
+      const unoSt = this.unoStates.get(matchId);
+      if (unoSt) {
+        startedPayload.unoState = {
+          currentTurn: unoSt.currentTurn,
+          currentColor: unoSt.currentColor,
+          topCard: unoSt.discardPile[unoSt.discardPile.length - 1],
+          drawPileCount: unoSt.drawPile.length,
+          handCounts: { a: unoSt.players.a.hand.length, b: unoSt.players.b.hand.length },
+          status: unoSt.status,
+        };
+      }
+    }
     this.eventBus.emit('match:started', startedPayload);
 
     // Give human players time to reconnect their sockets before starting the game loop
@@ -700,6 +784,10 @@ export class MatchManagerService {
       loopFn = startDelay > 0
         ? new Promise<void>(r => setTimeout(r, startDelay)).then(() => this.runRpsGameLoop(matchId))
         : this.runRpsGameLoop(matchId);
+    } else if (gameType === 'uno') {
+      loopFn = startDelay > 0
+        ? new Promise<void>(r => setTimeout(r, startDelay)).then(() => this.runUnoGameLoop(matchId))
+        : this.runUnoGameLoop(matchId);
     } else {
       loopFn = startDelay > 0
         ? new Promise<void>(r => setTimeout(r, startDelay)).then(() => this.runGameLoop(matchId))
@@ -960,6 +1048,32 @@ export class MatchManagerService {
     }
   }
 
+  private async runUnoGameLoop(matchId: string): Promise<void> {
+    while (true) {
+      const matchState = this.activeMatches.getMatch(matchId);
+      if (!matchState || matchState.status !== 'active') return;
+      const unoState = this.unoStates.get(matchId);
+      if (!unoState) { await this.endMatchWithError(matchId, 'UNO state lost'); return; }
+      if (this.findTimedOutSide(matchState)) return;
+      const result = await this.unoTurnController.executeTurn(matchState, unoState);
+      this.unoStates.set(matchId, result.unoState);
+      this.activeMatches.updateMatch(matchId, {
+        gameState: {
+          ...matchState.gameState,
+          moveNumber: result.unoState.moveCount,
+          gameOver: result.matchOver,
+          winner: result.matchOver ? (result.winner === 'a' ? 'B' : result.winner === 'b' ? 'W' : 'draw') : null,
+        },
+      });
+      if (result.matchOver) {
+        const winningSide: Side | undefined = result.winner ? result.winner as Side : undefined;
+        await this.endMatch(matchId, 'score', winningSide);
+        return;
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+  }
+
   /**
    * Check if any agent has exceeded MAX_TIMEOUTS. If so, end the match.
    * For 2-player: the other side wins. For N-player: the non-timed-out side with
@@ -995,6 +1109,7 @@ export class MatchManagerService {
       this.chessMoveHistories.delete(matchId);
       this.pokerStates.delete(matchId);
       this.rpsStates.delete(matchId);
+      this.unoStates.delete(matchId);
       this.matchGameTypes.delete(matchId);
       setTimeout(() => this.endedMatches.delete(matchId), 5000);
     }
@@ -1049,6 +1164,14 @@ export class MatchManagerService {
       if (rpsState) {
         if (rpsState.scores.a > rpsState.scores.b) forcedWinner = 'a';
         else if (rpsState.scores.b > rpsState.scores.a) forcedWinner = 'b';
+      }
+    } else if (gameType === 'uno') {
+      const unoState = this.unoStates.get(matchId);
+      if (unoState) {
+        const handA = unoState.players.a.hand.length;
+        const handB = unoState.players.b.hand.length;
+        if (handA < handB) forcedWinner = 'a';
+        else if (handB < handA) forcedWinner = 'b';
       }
     } else {
       const { scores } = matchState.gameState;
@@ -1275,6 +1398,15 @@ export class MatchManagerService {
             gameOver: false,
             winner: null,
           };
+        } else if (gameType === 'uno' || gameType === 'rps') {
+          // UNO/RPS: can't recover in-memory state (hands, draw pile) — cancel the match
+          this.logger.warn(`Cannot recover ${gameType} match ${matchId} — cancelling`);
+          await this.matchModel.updateOne({ _id: matchId }, { status: 'cancelled', endedAt: new Date() });
+          await Promise.all([
+            this.agentModel.updateOne({ _id: match.agents.a.agentId, status: 'in_match' }, { status: 'idle' }),
+            this.agentModel.updateOne({ _id: match.agents.b.agentId, status: 'in_match' }, { status: 'idle' }),
+          ]);
+          continue;
         } else {
           const scores = match.scores ?? { a: 0, b: 0 };
           gameState = {
@@ -1345,6 +1477,10 @@ export class MatchManagerService {
           loopFn = this.runChessGameLoop(matchId);
         } else if (gameType === 'poker') {
           loopFn = this.runPokerGameLoop(matchId);
+        } else if (gameType === 'rps') {
+          loopFn = this.runRpsGameLoop(matchId);
+        } else if (gameType === 'uno') {
+          loopFn = this.runUnoGameLoop(matchId);
         } else {
           loopFn = this.runGameLoop(matchId);
         }
@@ -1402,6 +1538,10 @@ export class MatchManagerService {
 
   getRpsState(matchId: string): RpsGameState | undefined {
     return this.rpsStates.get(matchId);
+  }
+
+  getUnoState(matchId: string): UnoGameState | undefined {
+    return this.unoStates.get(matchId);
   }
 
   getGameType(matchId: string): string {

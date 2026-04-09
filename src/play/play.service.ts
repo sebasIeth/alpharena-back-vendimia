@@ -6,6 +6,7 @@ import { MatchmakingService } from '../matchmaking/matchmaking.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { DEFAULT_ELO } from '../common/constants/game.constants';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class PlayService {
     private readonly settlementRouter: SettlementRouterService,
     private readonly x402PaymentStore: X402PaymentStore,
     private readonly humanMoveService: HumanMoveService,
+    private readonly orchestratorService: OrchestratorService,
   ) {}
 
   async joinQueue(userId: string, gameType?: string, stakeAmountInput?: number, token?: string) {
@@ -398,5 +400,66 @@ export class PlayService {
     this.withdrawCooldowns.set(userId, Date.now());
     this.logger.log(`Built withdraw tx: user=${userId}, amount=${amount} ${token}, to=${to}`);
     return { transaction: result.transaction, blockhash: result.blockhash, amount, to, token, chain };
+  }
+
+  /**
+   * Create a free test match against a simple random-move bot.
+   * No stake required — for testing purposes.
+   */
+  async createTestMatch(userId: string, gameType: string): Promise<{ matchId: string }> {
+    const agent = await this.getOrCreateHumanAgent(userId);
+
+    if (agent.status === 'in_match') {
+      throw new BadRequestException('Your agent is already in a match.');
+    }
+
+    // Create or find a bot agent for testing
+    let botAgent = await this.agentModel.findOne({ name: 'AlphArena Bot', type: 'http' });
+    if (!botAgent) {
+      botAgent = await this.agentModel.create({
+        name: 'AlphArena Bot',
+        type: 'http',
+        endpointUrl: 'internal://random-bot',
+        gameTypes: ['chess', 'poker', 'rps', 'uno'],
+        userId: agent.userId, // owned by the system but needs a userId
+        eloRating: DEFAULT_ELO,
+        elo: DEFAULT_ELO,
+        status: 'idle',
+        chain: 'solana',
+        walletAddress: '',
+      });
+    }
+
+    // Reset bot status if stuck
+    if (botAgent.status !== 'idle') {
+      botAgent.status = 'idle';
+      await botAgent.save();
+    }
+
+    const agentA = {
+      agentId: agent._id.toString(),
+      userId: agent.userId?.toString() || userId,
+      name: agent.name,
+      endpointUrl: agent.endpointUrl || '',
+      eloRating: agent.eloRating || DEFAULT_ELO,
+      type: 'human',
+      chain: 'solana',
+      token: 'USDC',
+    };
+
+    const agentB = {
+      agentId: botAgent._id.toString(),
+      userId: botAgent.userId?.toString() || userId,
+      name: botAgent.name,
+      endpointUrl: botAgent.endpointUrl || 'internal://random-bot',
+      eloRating: botAgent.eloRating || DEFAULT_ELO,
+      type: 'http',
+      chain: 'solana',
+      token: 'USDC',
+    };
+
+    const matchId = await this.orchestratorService.startMatch(agentA, agentB, 0, gameType);
+    this.logger.log(`Test match created: ${matchId}, gameType=${gameType}, user=${userId}`);
+    return { matchId };
   }
 }

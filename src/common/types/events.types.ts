@@ -24,6 +24,8 @@ export interface MatchStartedEvent {
   rpsRound?: number;
   rpsPhase?: string;
   rpsScores?: { a: number; b: number };
+  // UNO-specific
+  unoState?: Record<string, unknown>;
 }
 
 export interface MatchMoveEvent {
@@ -61,6 +63,18 @@ export interface MatchMoveEvent {
   rpsPhase?: string;
   rpsScores?: { a: number; b: number };
   rpsResult?: { roundNumber: number; throwA: string; throwB: string; winner: string };
+  // UNO-specific
+  unoAction?: { type: string; cardId?: string; chosenColor?: string };
+  unoPhase?: string;
+  currentTurn?: string;
+  currentColor?: string;
+  topCard?: { id: string; color: string; type: string; value: number | null };
+  drawPileCount?: number;
+  handCounts?: Record<string, number>;
+  status?: string;
+  winner?: string | null;
+  lastAction?: unknown;
+  direction?: number;
 }
 
 export interface MatchTimeoutEvent {
@@ -131,6 +145,15 @@ export interface MatchYourTurnEvent {
   rpsTotalRounds?: number;
   rpsPhase?: string;
   rpsScores?: { a: number; b: number };
+  // UNO-specific
+  legalActions?: unknown[];
+  hand?: unknown[];
+  opponentCardCount?: number;
+  topCard?: unknown;
+  currentColor?: string;
+  currentTurn?: string;
+  drawPileCount?: number;
+  handCounts?: Record<string, number>;
 }
 
 export interface EventBusEvents {

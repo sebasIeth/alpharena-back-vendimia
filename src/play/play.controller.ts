@@ -33,6 +33,11 @@ class WithdrawDto {
   token?: string;
 }
 
+class TestMatchDto {
+  @IsString()
+  gameType: string;
+}
+
 class MoveDto {
   @IsString()
   matchId: string;
@@ -85,5 +90,11 @@ export class PlayController {
   @Post('move')
   async move(@CurrentUser() user: AuthPayload, @Body() dto: MoveDto) {
     return this.playService.submitMove(user.userId, dto.matchId, dto.move);
+  }
+
+  @Post('test-match')
+  @HttpCode(201)
+  async testMatch(@CurrentUser() user: AuthPayload, @Body() dto: TestMatchDto) {
+    return this.playService.createTestMatch(user.userId, dto.gameType);
   }
 }
