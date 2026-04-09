@@ -39,6 +39,9 @@ sshpass -p "$VPS_PASSWORD" rsync -avz --delete \
   --exclude 'dist' \
   --exclude '.git' \
   --exclude '.claude' \
+  --exclude '.env' \
+  --exclude '.env.dev' \
+  --exclude '.env.tmp' \
   -e "ssh -o StrictHostKeyChecking=no" \
   ./ "$VPS_HOST:$APP_DIR/"
 

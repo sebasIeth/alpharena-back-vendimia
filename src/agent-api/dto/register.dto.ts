@@ -18,7 +18,7 @@ export class RegisterAgentDto {
 
   @IsOptional()
   @IsArray()
-  @IsIn(['chess', 'poker', 'marrakech', 'reversi'], { each: true })
+  @IsIn(['chess', 'poker', 'marrakech', 'reversi', 'uno'], { each: true })
   gameTypes?: string[];
 
   @IsOptional()
