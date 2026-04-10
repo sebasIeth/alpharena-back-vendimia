@@ -105,7 +105,11 @@ export class UnoTurnControllerService {
   ): Promise<UnoAction> {
     const { matchId } = matchState;
     const agent = matchState.agents[side];
-    const opponentSide = side === 'a' ? 'b' : 'a';
+    const playerCount = Object.keys(unoState.players).length;
+    const otherCounts: Record<string, number> = {};
+    for (const [s, p] of Object.entries(unoState.players)) {
+      if (s !== side) otherCounts[s] = p.hand.length;
+    }
     const topCard = unoState.discardPile[unoState.discardPile.length - 1];
 
     const moveRequest = {
@@ -115,7 +119,7 @@ export class UnoTurnControllerService {
       hand: unoState.players[side].hand,
       topCard,
       currentColor: unoState.currentColor,
-      opponentCardCount: unoState.players[opponentSide].hand.length,
+      opponentCardCounts: otherCounts,
       legalActions,
       moveNumber: unoState.moveCount,
       timeRemainingMs: TURN_TIMEOUT,

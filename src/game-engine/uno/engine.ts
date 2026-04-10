@@ -50,21 +50,49 @@ export function shuffle<T>(arr: T[]): T[] {
   return arr;
 }
 
+// ── Turn Helpers ────────────────────────────────────────────────────────────
+
+/** Side letter from index: 0->'a', 1->'b', etc. */
+function sideFromIndex(i: number): string {
+  return String.fromCharCode(97 + i);
+}
+
+/** Index from side letter: 'a'->0, 'b'->1, etc. */
+function indexFromSide(side: string): number {
+  return side.charCodeAt(0) - 97;
+}
+
+/** Get the next side in turn order, respecting direction. */
+function getNextSide(current: string, direction: 1 | -1, playerCount: number): string {
+  const idx = indexFromSide(current);
+  const next = ((idx + direction) % playerCount + playerCount) % playerCount;
+  return sideFromIndex(next);
+}
+
+/** Get all side letters for a given player count. */
+function getSides(playerCount: number): string[] {
+  return Array.from({ length: playerCount }, (_, i) => sideFromIndex(i));
+}
+
 // ── Initial State ───────────────────────────────────────────────────────────
 
-export function createInitialState(): UnoGameState {
+export function createInitialState(playerCount: number = 2): UnoGameState {
+  if (playerCount < 2 || playerCount > 4) throw new Error('UNO supports 2-4 players');
+
   let deck = shuffle(createDeck());
+  const sides = getSides(playerCount);
 
   // Deal 7 cards to each player
-  const handA: UnoCard[] = deck.splice(0, 7);
-  const handB: UnoCard[] = deck.splice(0, 7);
+  const players: Record<string, UnoPlayerState> = {};
+  for (const side of sides) {
+    players[side] = { hand: deck.splice(0, 7), isActive: true };
+  }
 
   // Flip starter card — if Wild Draw Four, reshuffle and redraw
   let starter: UnoCard;
   while (true) {
     starter = deck.shift()!;
     if (starter.type !== 'WILD_DRAW_FOUR') break;
-    // Put it back, reshuffle
     deck.push(starter);
     deck = shuffle(deck);
   }
@@ -75,35 +103,41 @@ export function createInitialState(): UnoGameState {
   // Determine starting color
   let currentColor: UnoCardColor = starter.color;
   if (starter.color === 'BLACK') {
-    // Wild as starter — pick random color
     currentColor = COLORS[Math.floor(Math.random() * 4)];
   }
 
-  // Determine starting turn after applying starter card effects
+  let direction: 1 | -1 = 1;
   let currentTurn = 'a';
-  if (starter.type === 'SKIP' || starter.type === 'REVERSE') {
-    // With 2 players, both Skip and Reverse skip player a's turn
-    currentTurn = 'b';
-  }
 
-  // If starter is Draw Two, player a draws 2 and turn goes to b
-  if (starter.type === 'DRAW_TWO') {
-    for (let i = 0; i < 2 && drawPile.length > 0; i++) {
-      handA.push(drawPile.shift()!);
+  // Apply starter card effects
+  if (starter.type === 'SKIP') {
+    // Skip first player → next player
+    currentTurn = getNextSide('a', direction, playerCount);
+    if (playerCount === 2) currentTurn = getNextSide(currentTurn, direction, playerCount); // skip wraps back
+  } else if (starter.type === 'REVERSE') {
+    direction = -1;
+    if (playerCount === 2) {
+      // 2 players: reverse = skip
+      currentTurn = 'b';
+    } else {
+      // N players: reverse direction, last player goes first
+      currentTurn = getNextSide('a', direction, playerCount);
     }
-    currentTurn = 'b';
+  } else if (starter.type === 'DRAW_TWO') {
+    // First player draws 2, turn goes to next
+    for (let i = 0; i < 2 && drawPile.length > 0; i++) {
+      players.a.hand.push(drawPile.shift()!);
+    }
+    currentTurn = getNextSide('a', direction, playerCount);
   }
 
   return {
-    players: {
-      a: { hand: handA, isActive: true },
-      b: { hand: handB, isActive: true },
-    },
+    players,
     drawPile,
     discardPile,
     currentTurn,
     currentColor,
-    direction: 1,
+    direction,
     status: 'playing',
     winner: null,
     lastAction: null,
@@ -124,7 +158,6 @@ export function getLegalActions(state: UnoGameState): UnoAction[] {
   for (const card of player.hand) {
     if (canPlayCard(card, topCard, state.currentColor)) {
       if (card.type === 'WILD' || card.type === 'WILD_DRAW_FOUR') {
-        // Wild cards: one action per color choice
         for (const color of COLORS) {
           actions.push({ type: 'PLAY_CARD', cardId: card.id, chosenColor: color });
         }
@@ -134,26 +167,16 @@ export function getLegalActions(state: UnoGameState): UnoAction[] {
     }
   }
 
-  // Can always draw a card
   actions.push({ type: 'DRAW_CARD' });
-
   return actions;
 }
 
 /** Check if a card can be played on the current discard. */
 function canPlayCard(card: UnoCard, topCard: UnoCard, currentColor: UnoCardColor): boolean {
-  // Wild and Wild Draw Four are always playable
   if (card.type === 'WILD' || card.type === 'WILD_DRAW_FOUR') return true;
-
-  // Match color
   if (card.color === currentColor) return true;
-
-  // Match number
   if (card.type === 'NUMBER' && topCard.type === 'NUMBER' && card.value === topCard.value) return true;
-
-  // Match symbol (Skip on Skip, Reverse on Reverse, Draw Two on Draw Two)
   if (card.type !== 'NUMBER' && card.type === topCard.type) return true;
-
   return false;
 }
 
@@ -163,7 +186,8 @@ function canPlayCard(card: UnoCard, topCard: UnoCard, currentColor: UnoCardColor
 export function applyAction(state: UnoGameState, action: UnoAction): UnoGameState {
   const side = state.currentTurn;
   const player = state.players[side];
-  const opponentSide = side === 'a' ? 'b' : 'a';
+  const playerCount = Object.keys(state.players).length;
+  const nextSide = getNextSide(side, state.direction, playerCount);
 
   state.lastAction = action;
   state.moveCount++;
@@ -192,59 +216,53 @@ export function applyAction(state: UnoGameState, action: UnoAction): UnoGameStat
     // Apply card effects
     switch (card.type) {
       case 'SKIP':
-        // Skip opponent — current player goes again? No — turn passes to opponent but they lose it.
-        // With 2 players: skip = opponent loses turn, so current player keeps turn.
-        // Actually: skip means next player is skipped. In 2-player, that's the opponent, so turn stays.
-        state.currentTurn = side; // stay on current player
+        // Skip next player → turn goes to the one after
+        state.currentTurn = getNextSide(nextSide, state.direction, playerCount);
         break;
 
       case 'REVERSE':
-        // With 2 players, Reverse acts as Skip
         state.direction = (state.direction === 1 ? -1 : 1) as 1 | -1;
-        state.currentTurn = side; // stay on current player (2-player reverse = skip)
+        if (playerCount === 2) {
+          // 2 players: reverse = skip
+          state.currentTurn = side;
+        } else {
+          // N players: reverse direction, next player in new direction
+          state.currentTurn = getNextSide(side, state.direction, playerCount);
+        }
         break;
 
       case 'DRAW_TWO':
-        // Opponent draws 2 and loses turn
-        drawCards(state, opponentSide, 2);
-        state.currentTurn = side; // stay on current player (opponent skipped)
+        // Next player draws 2 and loses turn
+        drawCards(state, nextSide, 2);
+        state.currentTurn = getNextSide(nextSide, state.direction, playerCount);
         break;
 
       case 'WILD_DRAW_FOUR':
-        // Opponent draws 4 and loses turn
-        drawCards(state, opponentSide, 4);
-        state.currentTurn = side; // stay on current player (opponent skipped)
+        // Next player draws 4 and loses turn
+        drawCards(state, nextSide, 4);
+        state.currentTurn = getNextSide(nextSide, state.direction, playerCount);
         break;
 
       default:
-        // Normal card or WILD without draw: advance turn
-        state.currentTurn = opponentSide;
+        // Normal card or WILD without draw: advance to next player
+        state.currentTurn = nextSide;
         break;
     }
   } else if (action.type === 'DRAW_CARD') {
-    // Draw 1 card
     recycleIfEmpty(state);
     if (state.drawPile.length > 0) {
       const drawnCard = state.drawPile.shift()!;
       player.hand.push(drawnCard);
 
       const topCard = state.discardPile[state.discardPile.length - 1];
-      // If drawn card is playable, the agent can play it on next action
-      // But per rules: "draw 1 card, if not playable → pass"
-      // We'll handle this: after draw, if the drawn card is playable we allow a PLAY or PASS
-      // For simplicity: draw always ends turn, but we give an extra action if drawn card is playable
       if (canPlayCard(drawnCard, topCard, state.currentColor)) {
-        // Return state with same turn — agent gets one more action (play drawn card or pass)
-        // The turn controller will request another action
         state.lastAction = { type: 'DRAW_CARD' };
         return state; // Don't change turn — agent can play the drawn card
       }
     }
-    // Can't play drawn card (or deck empty) — pass automatically
-    state.currentTurn = opponentSide;
+    state.currentTurn = nextSide;
   } else if (action.type === 'PASS') {
-    // Pass turn (only valid after drawing an unplayable card, handled by turn controller)
-    state.currentTurn = opponentSide;
+    state.currentTurn = nextSide;
   }
 
   return state;
@@ -273,6 +291,10 @@ function recycleIfEmpty(state: UnoGameState): void {
 
 /** Create a spectator-safe view (hides hands). */
 export function toSpectatorView(state: UnoGameState): Record<string, unknown> {
+  const handCounts: Record<string, number> = {};
+  for (const [side, p] of Object.entries(state.players)) {
+    handCounts[side] = p.hand.length;
+  }
   return {
     currentTurn: state.currentTurn,
     currentColor: state.currentColor,
@@ -283,19 +305,15 @@ export function toSpectatorView(state: UnoGameState): Record<string, unknown> {
     moveCount: state.moveCount,
     topCard: state.discardPile[state.discardPile.length - 1],
     drawPileCount: state.drawPile.length,
-    handCounts: {
-      a: state.players.a.hand.length,
-      b: state.players.b.hand.length,
-    },
+    handCounts,
+    playerCount: Object.keys(state.players).length,
   };
 }
 
 /** Create a player-specific view (shows only their hand). */
 export function toPlayerView(state: UnoGameState, side: string): Record<string, unknown> {
-  const opponentSide = side === 'a' ? 'b' : 'a';
   return {
     ...toSpectatorView(state),
     hand: state.players[side].hand,
-    opponentCardCount: state.players[opponentSide].hand.length,
   };
 }

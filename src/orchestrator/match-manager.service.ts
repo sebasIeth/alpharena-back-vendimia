@@ -130,9 +130,14 @@ export class MatchManagerService {
     const potAmount = stakeAmount * agents.length;
 
     // 2-player games require exactly 2 agents
-    if (gameType === 'chess' || gameType === 'marrakech' || gameType === 'reversi' || gameType === 'rps' || gameType === 'uno') {
+    if (gameType === 'chess' || gameType === 'marrakech' || gameType === 'reversi' || gameType === 'rps') {
       if (agents.length !== 2) {
         throw new Error(`Game type "${gameType}" requires exactly 2 agents, got ${agents.length}`);
+      }
+    }
+    if (gameType === 'uno') {
+      if (agents.length < 2 || agents.length > 4) {
+        throw new Error(`UNO requires 2-4 agents, got ${agents.length}`);
       }
     }
 
@@ -153,7 +158,7 @@ export class MatchManagerService {
     }
 
     if (gameType === 'uno') {
-      return this.createUnoMatch(agents[0], agents[1], stakeAmount, potAmount, existingMatchId);
+      return this.createUnoMatch(agents, stakeAmount, potAmount, existingMatchId);
     }
 
     return this.createReversiMatch(agents[0], agents[1], stakeAmount, potAmount, gameType, existingMatchId);
@@ -424,19 +429,40 @@ export class MatchManagerService {
   }
 
   private async createUnoMatch(
-    agentA: MatchAgentInput, agentB: MatchAgentInput,
+    agents: MatchAgentInput[],
     stakeAmount: number, potAmount: number, existingMatchId?: string,
   ): Promise<string> {
-    const unoState = createUnoInitialState();
+    const unoState = createUnoInitialState(agents.length);
+
+    const matchAgents: Record<string, { agentId: string; userId: string; name: string; eloAtStart: number }> = {};
+    const timeouts: Record<string, number> = {};
+    const activeAgents: Record<string, { agentId: string; endpointUrl: string; piece: PlayerColor; type?: string; openclawUrl?: string; openclawToken?: string; openclawAgentId?: string }> = {};
+    const eventAgents: Record<string, { agentId: string; name: string }> = {};
+
+    const pieceColors: PlayerColor[] = ['B', 'W'];
+    agents.forEach((agent, i) => {
+      const side = String.fromCharCode(97 + i);
+      matchAgents[side] = { agentId: agent.agentId, userId: agent.userId, name: agent.name, eloAtStart: agent.eloRating };
+      timeouts[side] = 0;
+      activeAgents[side] = {
+        agentId: agent.agentId, endpointUrl: agent.endpointUrl,
+        piece: pieceColors[i % 2], type: agent.type,
+        openclawUrl: agent.openclawUrl, openclawToken: agent.openclawToken, openclawAgentId: agent.openclawAgentId,
+      };
+      eventAgents[side] = { agentId: agent.agentId, name: agent.name };
+    });
+
+    const handCounts: Record<string, number> = {};
+    for (const [side, p] of Object.entries(unoState.players)) {
+      handCounts[side] = p.hand.length;
+    }
+
     const matchData = {
-      gameType: 'uno', chain: agentA.chain || 'solana', token: agentA.token || 'USDC',
-      agents: {
-        a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
-        b: { agentId: agentB.agentId, userId: agentB.userId, name: agentB.name, eloAtStart: agentB.eloRating },
-      },
+      gameType: 'uno', chain: agents[0].chain || 'solana', token: agents[0].token || 'USDC',
+      agents: matchAgents,
       stakeAmount, potAmount, status: 'starting',
       currentBoard: [], currentTurn: unoState.currentTurn, moveCount: 0,
-      timeouts: { a: 0, b: 0 }, txHashes: { escrow: null, payout: null },
+      timeouts, txHashes: { escrow: null, payout: null },
       unoState: {
         currentTurn: unoState.currentTurn,
         currentColor: unoState.currentColor,
@@ -444,9 +470,11 @@ export class MatchManagerService {
         status: unoState.status,
         topCard: unoState.discardPile[unoState.discardPile.length - 1],
         drawPileCount: unoState.drawPile.length,
-        handCounts: { a: unoState.players.a.hand.length, b: unoState.players.b.hand.length },
+        handCounts,
+        playerCount: agents.length,
       },
     };
+
     let matchId: string;
     if (existingMatchId) {
       await this.matchModel.findByIdAndUpdate(existingMatchId, { $set: matchData });
@@ -455,33 +483,28 @@ export class MatchManagerService {
       const matchDoc = await this.matchModel.create(matchData);
       matchId = matchDoc._id.toString();
     }
+
     const compatState: GameState = {
       board: [] as unknown as Board, currentPlayer: 'B', moveNumber: 0,
       scores: { black: 0, white: 0 }, gameOver: false, winner: null,
     };
     const matchState: ActiveMatchState = {
       matchId, gameState: compatState, clock: null, turnDeadline: 0,
-      timeouts: { a: 0, b: 0 }, status: 'starting',
-      agents: {
-        a: { agentId: agentA.agentId, endpointUrl: agentA.endpointUrl, piece: 'B', type: agentA.type, openclawUrl: agentA.openclawUrl, openclawToken: agentA.openclawToken, openclawAgentId: agentA.openclawAgentId },
-        b: { agentId: agentB.agentId, endpointUrl: agentB.endpointUrl, piece: 'W', type: agentB.type, openclawUrl: agentB.openclawUrl, openclawToken: agentB.openclawToken, openclawAgentId: agentB.openclawAgentId },
-      },
-      startedAt: Date.now(),
+      timeouts, status: 'starting', agents: activeAgents, startedAt: Date.now(),
     };
+
     this.activeMatches.addMatch(matchState);
     this.unoStates.set(matchId, unoState);
     this.matchGameTypes.set(matchId, 'uno');
-    await Promise.all([
-      this.agentModel.updateOne({ _id: agentA.agentId }, { status: 'in_match' }),
-      this.agentModel.updateOne({ _id: agentB.agentId }, { status: 'in_match' }),
-    ]);
+
+    await Promise.all(
+      agents.map((a) => this.agentModel.updateOne({ _id: a.agentId }, { status: 'in_match' })),
+    );
+
     this.eventBus.emit('match:created', {
-      matchId, agents: {
-        a: { agentId: agentA.agentId, name: agentA.name },
-        b: { agentId: agentB.agentId, name: agentB.name },
-      }, gameType: 'uno', stakeAmount,
+      matchId, agents: eventAgents, gameType: 'uno', stakeAmount,
     });
-    this.logger.log(`UNO match ${matchId} created`);
+    this.logger.log(`UNO match ${matchId} created (${agents.length} players)`);
     return matchId;
   }
 
@@ -1168,10 +1191,14 @@ export class MatchManagerService {
     } else if (gameType === 'uno') {
       const unoState = this.unoStates.get(matchId);
       if (unoState) {
-        const handA = unoState.players.a.hand.length;
-        const handB = unoState.players.b.hand.length;
-        if (handA < handB) forcedWinner = 'a';
-        else if (handB < handA) forcedWinner = 'b';
+        let bestSide: string | undefined;
+        let bestCount = Infinity;
+        let tied = false;
+        for (const [side, p] of Object.entries(unoState.players)) {
+          if (p.hand.length < bestCount) { bestCount = p.hand.length; bestSide = side; tied = false; }
+          else if (p.hand.length === bestCount) { tied = true; }
+        }
+        if (bestSide && !tied) forcedWinner = bestSide as Side;
       }
     } else {
       const { scores } = matchState.gameState;
