@@ -779,7 +779,7 @@ export class MatchManagerService {
           currentColor: unoSt.currentColor,
           topCard: unoSt.discardPile[unoSt.discardPile.length - 1],
           drawPileCount: unoSt.drawPile.length,
-          handCounts: { a: unoSt.players.a.hand.length, b: unoSt.players.b.hand.length },
+          handCounts: Object.fromEntries(Object.entries(unoSt.players).map(([s, p]) => [s, p.hand.length])),
           status: unoSt.status,
         };
       }

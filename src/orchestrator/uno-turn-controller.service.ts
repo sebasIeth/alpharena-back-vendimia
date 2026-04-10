@@ -282,10 +282,9 @@ export class UnoTurnControllerService {
             moveCount: state.moveCount,
             topCard: state.discardPile[state.discardPile.length - 1],
             drawPileCount: state.drawPile.length,
-            handCounts: {
-              a: state.players.a.hand.length,
-              b: state.players.b.hand.length,
-            },
+            handCounts: Object.fromEntries(
+              Object.entries(state.players).map(([s, p]) => [s, p.hand.length]),
+            ),
             // Store full hands for replay after match ends
             ...(state.status === 'finished' ? {
               players: {
