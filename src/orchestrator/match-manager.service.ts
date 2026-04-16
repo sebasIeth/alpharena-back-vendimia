@@ -25,6 +25,15 @@ import { createRpsInitialState, RpsGameState } from './rps-turn-controller.servi
 import { UnoTurnControllerService } from './uno-turn-controller.service';
 import { createInitialState as createUnoInitialState } from '../game-engine/uno';
 import { UnoGameState } from '../common/types/uno.types';
+import { WerewolfTurnControllerService } from './werewolf-turn-controller.service';
+import {
+  createInitialState as createWerewolfInitialState,
+  toPublicSnapshot as werewolfPublicSnapshot,
+} from '../game-engine/werewolf';
+import {
+  WerewolfGameState,
+  WEREWOLF_PLAYER_COUNT,
+} from '../common/types/werewolf.types';
 import { createInitialState as createPokerInitialState, isMatchOver as isPokerMatchOver } from '../game-engine/poker';
 import { ResultHandlerService } from './result-handler.service';
 import { EventBusService } from './event-bus.service';
@@ -60,6 +69,7 @@ export class MatchManagerService {
   private readonly pokerStates = new Map<string, PokerGameState>();
   private readonly rpsStates = new Map<string, RpsGameState>();
   private readonly unoStates = new Map<string, UnoGameState>();
+  private readonly werewolfStates = new Map<string, WerewolfGameState>();
   private readonly matchGameTypes = new Map<string, string>();
 
   constructor(
@@ -72,6 +82,7 @@ export class MatchManagerService {
     private readonly pokerTurnController: PokerTurnControllerService,
     private readonly rpsTurnController: RpsTurnControllerService,
     private readonly unoTurnController: UnoTurnControllerService,
+    private readonly werewolfTurnController: WerewolfTurnControllerService,
     private readonly resultHandler: ResultHandlerService,
     private readonly eventBus: EventBusService,
     private readonly settlementRouter: SettlementRouterService,
@@ -140,6 +151,11 @@ export class MatchManagerService {
         throw new Error(`UNO requires 2-4 agents, got ${agents.length}`);
       }
     }
+    if (gameType === 'werewolf') {
+      if (agents.length !== WEREWOLF_PLAYER_COUNT) {
+        throw new Error(`Werewolf requires exactly ${WEREWOLF_PLAYER_COUNT} agents, got ${agents.length}`);
+      }
+    }
 
     if (gameType === 'marrakech') {
       return this.createMarrakechMatch(agents[0], agents[1], stakeAmount, potAmount, existingMatchId);
@@ -159,6 +175,10 @@ export class MatchManagerService {
 
     if (gameType === 'uno') {
       return this.createUnoMatch(agents, stakeAmount, potAmount, existingMatchId);
+    }
+
+    if (gameType === 'werewolf') {
+      return this.createWerewolfMatch(agents, stakeAmount, potAmount, existingMatchId);
     }
 
     return this.createReversiMatch(agents[0], agents[1], stakeAmount, potAmount, gameType, existingMatchId);
@@ -508,6 +528,103 @@ export class MatchManagerService {
     return matchId;
   }
 
+  private async createWerewolfMatch(
+    agents: MatchAgentInput[],
+    stakeAmount: number,
+    potAmount: number,
+    existingMatchId?: string,
+  ): Promise<string> {
+    const werewolfState = createWerewolfInitialState();
+
+    const matchAgents: Record<string, { agentId: string; userId: string; name: string; eloAtStart: number }> = {};
+    const timeouts: Record<string, number> = {};
+    const activeAgents: Record<string, { agentId: string; endpointUrl: string; piece: PlayerColor; type?: string; openclawUrl?: string; openclawToken?: string; openclawAgentId?: string }> = {};
+    const eventAgents: Record<string, { agentId: string; name: string }> = {};
+
+    const pieceColors: PlayerColor[] = ['B', 'W'];
+    agents.forEach((agent, i) => {
+      const side = sideLetterFromIndex(i);
+      matchAgents[side] = {
+        agentId: agent.agentId,
+        userId: agent.userId,
+        name: agent.name,
+        eloAtStart: agent.eloRating,
+      };
+      timeouts[side] = 0;
+      activeAgents[side] = {
+        agentId: agent.agentId,
+        endpointUrl: agent.endpointUrl,
+        piece: pieceColors[i % 2],
+        type: agent.type,
+        openclawUrl: agent.openclawUrl,
+        openclawToken: agent.openclawToken,
+        openclawAgentId: agent.openclawAgentId,
+      };
+      eventAgents[side] = { agentId: agent.agentId, name: agent.name };
+    });
+
+    const matchData = {
+      gameType: 'werewolf',
+      chain: agents[0].chain || 'solana',
+      token: agents[0].token || 'USDC',
+      agents: matchAgents,
+      stakeAmount,
+      potAmount,
+      status: 'starting',
+      currentBoard: [],
+      currentTurn: werewolfState.activeSide ?? 'a',
+      moveCount: 0,
+      timeouts,
+      txHashes: { escrow: null, payout: null },
+      werewolfState: werewolfPublicSnapshot(werewolfState),
+    };
+
+    let matchId: string;
+    if (existingMatchId) {
+      await this.matchModel.findByIdAndUpdate(existingMatchId, { $set: matchData });
+      matchId = existingMatchId;
+    } else {
+      const matchDoc = await this.matchModel.create(matchData);
+      matchId = matchDoc._id.toString();
+    }
+
+    const compatState: GameState = {
+      board: [] as unknown as Board,
+      currentPlayer: 'B',
+      moveNumber: 0,
+      scores: { black: 0, white: 0 },
+      gameOver: false,
+      winner: null,
+    };
+    const matchState: ActiveMatchState = {
+      matchId,
+      gameState: compatState,
+      clock: null,
+      turnDeadline: 0,
+      timeouts,
+      status: 'starting',
+      agents: activeAgents,
+      startedAt: Date.now(),
+    };
+
+    this.activeMatches.addMatch(matchState);
+    this.werewolfStates.set(matchId, werewolfState);
+    this.matchGameTypes.set(matchId, 'werewolf');
+
+    await Promise.all(
+      agents.map((a) => this.agentModel.updateOne({ _id: a.agentId }, { status: 'in_match' })),
+    );
+
+    this.eventBus.emit('match:created', {
+      matchId,
+      agents: eventAgents,
+      gameType: 'werewolf',
+      stakeAmount,
+    });
+    this.logger.log(`Werewolf match ${matchId} created (${agents.length} players)`);
+    return matchId;
+  }
+
   private async createPokerMatch(
     agents: MatchAgentInput[],
     stakeAmount: number,
@@ -784,6 +901,12 @@ export class MatchManagerService {
         };
       }
     }
+    if (gameType === 'werewolf') {
+      const wwSt = this.werewolfStates.get(matchId);
+      if (wwSt) {
+        startedPayload.werewolfState = werewolfPublicSnapshot(wwSt);
+      }
+    }
     this.eventBus.emit('match:started', startedPayload);
 
     // Give human players time to reconnect their sockets before starting the game loop
@@ -811,6 +934,10 @@ export class MatchManagerService {
       loopFn = startDelay > 0
         ? new Promise<void>(r => setTimeout(r, startDelay)).then(() => this.runUnoGameLoop(matchId))
         : this.runUnoGameLoop(matchId);
+    } else if (gameType === 'werewolf') {
+      loopFn = startDelay > 0
+        ? new Promise<void>(r => setTimeout(r, startDelay)).then(() => this.runWerewolfGameLoop(matchId))
+        : this.runWerewolfGameLoop(matchId);
     } else {
       loopFn = startDelay > 0
         ? new Promise<void>(r => setTimeout(r, startDelay)).then(() => this.runGameLoop(matchId))
@@ -1097,6 +1224,54 @@ export class MatchManagerService {
     }
   }
 
+  private async runWerewolfGameLoop(matchId: string): Promise<void> {
+    while (true) {
+      const matchState = this.activeMatches.getMatch(matchId);
+      if (!matchState || matchState.status !== 'active') return;
+      const wwState = this.werewolfStates.get(matchId);
+      if (!wwState) {
+        await this.endMatchWithError(matchId, 'Werewolf state lost');
+        return;
+      }
+      if (this.findTimedOutSide(matchState)) return;
+
+      const result = await this.werewolfTurnController.executeTurn(matchState, wwState);
+      this.werewolfStates.set(matchId, result.werewolfState);
+
+      this.activeMatches.updateMatch(matchId, {
+        gameState: {
+          ...matchState.gameState,
+          moveNumber: result.werewolfState.moveCount,
+          gameOver: result.matchOver,
+          winner: result.matchOver
+            ? (result.winner === 'VILLAGERS' ? 'W' : result.winner === 'WEREWOLVES' ? 'B' : 'draw')
+            : null,
+        },
+      });
+
+      if (result.matchOver) {
+        // Map team winner to a representative side for bookkeeping:
+        // pick the first alive player of the winning team, else undefined (draw).
+        let winningSide: Side | undefined;
+        if (result.winner === 'VILLAGERS' || result.winner === 'WEREWOLVES') {
+          const wantWolf = result.winner === 'WEREWOLVES';
+          const rep = Object.values(result.werewolfState.players).find((p) =>
+            wantWolf ? p.role === 'WEREWOLF' : p.role !== 'WEREWOLF',
+          );
+          if (rep) winningSide = rep.side as Side;
+        }
+        await this.endMatch(matchId, result.winner === 'DRAW' ? 'draw' : 'score', winningSide);
+        return;
+      }
+      // Pace bot-heavy matches so humans can follow along
+      const activeAgent = result.werewolfState.activeSide
+        ? matchState.agents[result.werewolfState.activeSide]
+        : null;
+      const nextIsBot = activeAgent?.endpointUrl?.startsWith('internal://');
+      await new Promise<void>((resolve) => setTimeout(resolve, nextIsBot ? 1200 : 0));
+    }
+  }
+
   /**
    * Check if any agent has exceeded MAX_TIMEOUTS. If so, end the match.
    * For 2-player: the other side wins. For N-player: the non-timed-out side with
@@ -1133,6 +1308,7 @@ export class MatchManagerService {
       this.pokerStates.delete(matchId);
       this.rpsStates.delete(matchId);
       this.unoStates.delete(matchId);
+      this.werewolfStates.delete(matchId);
       this.matchGameTypes.delete(matchId);
       setTimeout(() => this.endedMatches.delete(matchId), 5000);
     }
@@ -1200,6 +1376,15 @@ export class MatchManagerService {
         }
         if (bestSide && !tied) forcedWinner = bestSide as Side;
       }
+    } else if (gameType === 'werewolf') {
+      const wwState = this.werewolfStates.get(matchId);
+      if (wwState) {
+        // Favor villagers at timeout — they're the default "not eliminated" team
+        const aliveVillager = Object.values(wwState.players).find(
+          (p) => p.isAlive && p.role !== 'WEREWOLF',
+        );
+        if (aliveVillager) forcedWinner = aliveVillager.side as Side;
+      }
     } else {
       const { scores } = matchState.gameState;
       if (scores.black > scores.white) forcedWinner = 'a';
@@ -1243,6 +1428,7 @@ export class MatchManagerService {
     this.chessEngines.delete(matchId);
     this.chessMoveHistories.delete(matchId);
     this.pokerStates.delete(matchId);
+    this.werewolfStates.delete(matchId);
     this.matchGameTypes.delete(matchId);
     setTimeout(() => this.endedMatches.delete(matchId), 5000);
   }
@@ -1425,14 +1611,16 @@ export class MatchManagerService {
             gameOver: false,
             winner: null,
           };
-        } else if (gameType === 'uno' || gameType === 'rps') {
-          // UNO/RPS: can't recover in-memory state (hands, draw pile) — cancel the match
+        } else if (gameType === 'uno' || gameType === 'rps' || gameType === 'werewolf') {
+          // UNO/RPS/Werewolf: can't recover in-memory secrets (hands, roles) — cancel the match
           this.logger.warn(`Cannot recover ${gameType} match ${matchId} — cancelling`);
           await this.matchModel.updateOne({ _id: matchId }, { status: 'cancelled', endedAt: new Date() });
-          await Promise.all([
-            this.agentModel.updateOne({ _id: match.agents.a.agentId, status: 'in_match' }, { status: 'idle' }),
-            this.agentModel.updateOne({ _id: match.agents.b.agentId, status: 'in_match' }, { status: 'idle' }),
-          ]);
+          const agentEntries = Object.values(match.agents || {});
+          await Promise.all(
+            agentEntries
+              .filter((a) => a?.agentId)
+              .map((a) => this.agentModel.updateOne({ _id: a.agentId, status: 'in_match' }, { status: 'idle' })),
+          );
           continue;
         } else {
           const scores = match.scores ?? { a: 0, b: 0 };
@@ -1569,6 +1757,10 @@ export class MatchManagerService {
 
   getUnoState(matchId: string): UnoGameState | undefined {
     return this.unoStates.get(matchId);
+  }
+
+  getWerewolfState(matchId: string): WerewolfGameState | undefined {
+    return this.werewolfStates.get(matchId);
   }
 
   getGameType(matchId: string): string {

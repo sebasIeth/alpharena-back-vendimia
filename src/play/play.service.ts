@@ -7,6 +7,7 @@ import { SettlementRouterService } from '../settlement/settlement-router.service
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import { MatchManagerService } from '../orchestrator/match-manager.service';
 import { DEFAULT_ELO } from '../common/constants/game.constants';
 
 @Injectable()
@@ -24,6 +25,7 @@ export class PlayService {
     private readonly x402PaymentStore: X402PaymentStore,
     private readonly humanMoveService: HumanMoveService,
     private readonly orchestratorService: OrchestratorService,
+    private readonly matchManager: MatchManagerService,
   ) {}
 
   async joinQueue(userId: string, gameType?: string, stakeAmountInput?: number, token?: string) {
@@ -229,6 +231,49 @@ export class PlayService {
     };
   }
 
+  async getWerewolfPrivateState(userId: string, matchId: string) {
+    const ww = this.matchManager.getWerewolfState(matchId);
+    if (!ww) throw new NotFoundException('Werewolf match not found');
+
+    const matchState = this.orchestratorService.getActiveMatch(matchId);
+    if (!matchState) throw new NotFoundException('Match not active');
+
+    // Find the human's side
+    let mySide: string | null = null;
+    for (const side of Object.keys(matchState.agents)) {
+      const agentInfo = matchState.agents[side];
+      if (!agentInfo?.agentId) continue;
+      const agent = await this.agentModel.findById(agentInfo.agentId);
+      if (agent?.type === 'human' && agent.userId?.toString() === userId) {
+        mySide = side;
+        break;
+      }
+    }
+    if (!mySide) throw new BadRequestException('You are not a human player in this match');
+
+    const me = ww.players[mySide];
+    if (!me) throw new NotFoundException('Player not found in state');
+
+    const response: Record<string, unknown> = {
+      mySide,
+      yourRole: me.role,
+      yourDisplayName: me.displayName,
+      phase: ww.phase,
+      cycle: ww.cycle,
+      activeSide: ww.activeSide,
+    };
+
+    if (me.role === 'WEREWOLF') {
+      response.knownWerewolves = Object.values(ww.players)
+        .filter((p) => p.role === 'WEREWOLF' && p.side !== mySide)
+        .map((p) => p.side);
+    }
+    if (me.role === 'SEER') {
+      response.seerMemory = ww.seerMemory;
+    }
+    return response;
+  }
+
   async submitMove(userId: string, matchId: string, move: unknown) {
     // Find the user's human agent involved in this match
     const pendingAgentId = this.humanMoveService.getPendingAgentId(matchId);
@@ -413,30 +458,7 @@ export class PlayService {
       throw new BadRequestException('Your agent is already in a match.');
     }
 
-    // Create or find a bot agent for testing
-    let botAgent = await this.agentModel.findOne({ name: 'AlphArena Bot', type: 'http' });
-    if (!botAgent) {
-      botAgent = await this.agentModel.create({
-        name: 'AlphArena Bot',
-        type: 'http',
-        endpointUrl: 'internal://random-bot',
-        gameTypes: ['chess', 'poker', 'rps', 'uno'],
-        userId: agent.userId, // owned by the system but needs a userId
-        eloRating: DEFAULT_ELO,
-        elo: DEFAULT_ELO,
-        status: 'idle',
-        chain: 'solana',
-        walletAddress: '',
-      });
-    }
-
-    // Reset bot status if stuck
-    if (botAgent.status !== 'idle') {
-      botAgent.status = 'idle';
-      await botAgent.save();
-    }
-
-    const agentA = {
+    const humanAgent = {
       agentId: agent._id.toString(),
       userId: agent.userId?.toString() || userId,
       name: agent.name,
@@ -447,6 +469,30 @@ export class PlayService {
       token: 'USDC',
     };
 
+    // Werewolf: 1 human + 6 internal bots
+    if (gameType === 'werewolf') {
+      const bots = await this.ensureBotAgents(agent.userId?.toString() || userId, 6);
+      const botAgents = bots.map((b, i) => ({
+        agentId: b._id.toString(),
+        userId: b.userId?.toString() || userId,
+        name: `${b.name} ${i + 1}`,
+        endpointUrl: b.endpointUrl || 'internal://random-bot',
+        eloRating: b.eloRating || DEFAULT_ELO,
+        type: 'http',
+        chain: 'solana',
+        token: 'USDC',
+      }));
+      const matchId = await this.orchestratorService.startMatchMulti(
+        [humanAgent, ...botAgents],
+        0,
+        'werewolf',
+      );
+      this.logger.log(`Werewolf test match created: ${matchId}, user=${userId}`);
+      return { matchId };
+    }
+
+    // Default: 1 human + 1 bot
+    const botAgent = await this.getOrCreateSharedBot();
     const agentB = {
       agentId: botAgent._id.toString(),
       userId: botAgent.userId?.toString() || userId,
@@ -458,8 +504,59 @@ export class PlayService {
       token: 'USDC',
     };
 
-    const matchId = await this.orchestratorService.startMatch(agentA, agentB, 0, gameType);
+    const matchId = await this.orchestratorService.startMatch(humanAgent, agentB, 0, gameType);
     this.logger.log(`Test match created: ${matchId}, gameType=${gameType}, user=${userId}`);
     return { matchId };
+  }
+
+  private async getOrCreateSharedBot() {
+    let bot = await this.agentModel.findOne({ name: 'AlphArena Bot', type: 'http' });
+    if (!bot) {
+      bot = await this.agentModel.create({
+        name: 'AlphArena Bot',
+        type: 'http',
+        endpointUrl: 'internal://random-bot',
+        gameTypes: ['chess', 'poker', 'rps', 'uno'],
+        userId: null,
+        eloRating: DEFAULT_ELO,
+        elo: DEFAULT_ELO,
+        status: 'idle',
+        chain: 'solana',
+        walletAddress: '',
+      });
+    }
+    if (bot.status !== 'idle') {
+      bot.status = 'idle';
+      await bot.save();
+    }
+    return bot;
+  }
+
+  private async ensureBotAgents(fallbackUserId: string, count: number): Promise<Agent[]> {
+    const bots: Agent[] = [];
+    for (let i = 1; i <= count; i++) {
+      const name = `AlphArena Bot ${i}`;
+      let bot = await this.agentModel.findOne({ name, type: 'http' });
+      if (!bot) {
+        bot = await this.agentModel.create({
+          name,
+          type: 'http',
+          endpointUrl: 'internal://random-bot',
+          gameTypes: ['werewolf', 'chess', 'poker', 'rps', 'uno'],
+          userId: fallbackUserId,
+          eloRating: DEFAULT_ELO,
+          elo: DEFAULT_ELO,
+          status: 'idle',
+          chain: 'solana',
+          walletAddress: '',
+        });
+      }
+      if (bot.status !== 'idle') {
+        bot.status = 'idle';
+        await bot.save();
+      }
+      bots.push(bot);
+    }
+    return bots;
   }
 }

@@ -115,6 +115,9 @@ export class Match extends Document {
   @Prop({ type: MongooseSchema.Types.Mixed, default: null })
   unoState: any;
 
+  @Prop({ type: MongooseSchema.Types.Mixed, default: null })
+  werewolfState: any;
+
   @Prop({ type: Date, default: null })
   turnStartedAt: Date;
 

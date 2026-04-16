@@ -50,6 +50,10 @@ export class BroadcasterService implements OnModuleInit, OnModuleDestroy {
       if (data.rpsRound != null) payload.rpsRound = data.rpsRound;
       if (data.rpsPhase) payload.rpsPhase = data.rpsPhase;
       if (data.rpsScores) payload.rpsScores = data.rpsScores;
+      // UNO-specific
+      if (data.unoState) payload.unoState = data.unoState;
+      // Werewolf-specific
+      if (data.werewolfState) payload.werewolfState = data.werewolfState;
       this.rooms.broadcast(data.matchId, { type: 'match:start', data: payload });
     };
 
@@ -102,6 +106,14 @@ export class BroadcasterService implements OnModuleInit, OnModuleDestroy {
       if (data.winner !== undefined) payload.winner = data.winner;
       if (data.lastAction) payload.lastAction = data.lastAction;
       if (data.direction != null) payload.direction = data.direction;
+      // Werewolf-specific
+      if (data.werewolfAction) payload.werewolfAction = data.werewolfAction;
+      if (data.werewolfPhase) payload.werewolfPhase = data.werewolfPhase;
+      if (data.cycle != null) payload.cycle = data.cycle;
+      if (data.activeSide !== undefined) payload.activeSide = data.activeSide;
+      if (data.werewolfPlayers) payload.werewolfPlayers = data.werewolfPlayers;
+      if (data.discussionLog) payload.discussionLog = data.discussionLog;
+      if (data.deaths) payload.deaths = data.deaths;
       this.rooms.broadcast(data.matchId, { type: 'match:move', data: payload });
     };
 
@@ -202,6 +214,17 @@ export class BroadcasterService implements OnModuleInit, OnModuleDestroy {
       if (data.drawPileCount != null) ytPayload.drawPileCount = data.drawPileCount;
       if (data.handCounts) ytPayload.handCounts = data.handCounts;
       if (data.opponentCardCount != null) ytPayload.opponentCardCount = data.opponentCardCount;
+      // Werewolf-specific
+      if (data.yourRole) ytPayload.yourRole = data.yourRole;
+      if (data.yourDisplayName) ytPayload.yourDisplayName = data.yourDisplayName;
+      if (data.knownWerewolves) ytPayload.knownWerewolves = data.knownWerewolves;
+      if (data.seerMemory) ytPayload.seerMemory = data.seerMemory;
+      if (data.werewolfPhase) ytPayload.werewolfPhase = data.werewolfPhase;
+      if (data.cycle != null) ytPayload.cycle = data.cycle;
+      if (data.activeSide !== undefined) ytPayload.activeSide = data.activeSide;
+      if (data.werewolfPlayers) ytPayload.werewolfPlayers = data.werewolfPlayers;
+      if (data.discussionLog) ytPayload.discussionLog = data.discussionLog;
+      if (data.deaths) ytPayload.deaths = data.deaths;
       this.rooms.broadcast(data.matchId, { type: 'match:your_turn', data: ytPayload });
     };
 

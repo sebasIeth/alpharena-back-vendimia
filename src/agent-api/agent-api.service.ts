@@ -14,6 +14,10 @@ import { MatchManagerService } from '../orchestrator/match-manager.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { getLegalActions } from '../game-engine/poker';
+import {
+  getLegalActions as getWerewolfLegalActions,
+  toPlayerView as werewolfPlayerView,
+} from '../game-engine/werewolf';
 import { RegisterAgentDto } from './dto/register.dto';
 import { JoinQueueDto } from './dto/queue.dto';
 import { SubmitMoveDto } from './dto/move.dto';
@@ -299,6 +303,15 @@ export class AgentApiService {
           baseState.legalMoves = ['rock', 'paper', 'scissors'];
         }
       }
+    } else if (gameType === 'werewolf') {
+      const wwState = this.matchManager.getWerewolfState?.(matchId);
+      if (wwState && agentSide) {
+        const view = werewolfPlayerView(wwState, agentSide) as Record<string, unknown>;
+        Object.assign(baseState, view);
+        if (isYourTurn) {
+          baseState.legalActions = getWerewolfLegalActions(wwState, agentSide);
+        }
+      }
     } else {
       // Reversi/Marrakech — use generic game state
       baseState.board = matchState.gameState.board;
@@ -358,6 +371,14 @@ export class AgentApiService {
         throw new BadRequestException('RPS move requires "move" with value "rock", "paper", or "scissors"');
       }
       move = rpsMove;
+    } else if (gameType === 'werewolf') {
+      const wwAction = (dto as unknown as { werewolfAction?: unknown }).werewolfAction
+        ?? dto.action
+        ?? dto.move;
+      if (!wwAction || typeof wwAction !== 'object') {
+        throw new BadRequestException('Werewolf move requires "werewolfAction" with a tagged action object');
+      }
+      move = wwAction;
     } else {
       // Reversi/Marrakech
       if (dto.row === undefined || dto.col === undefined) {

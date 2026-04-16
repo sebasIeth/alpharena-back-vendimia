@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards, HttpCode } from '@nestjs/common';
 import { IsString, IsNumber, Min, Max, IsIn, IsOptional } from 'class-validator';
 import { PlayService } from './play.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -96,5 +96,13 @@ export class PlayController {
   @HttpCode(201)
   async testMatch(@CurrentUser() user: AuthPayload, @Body() dto: TestMatchDto) {
     return this.playService.createTestMatch(user.userId, dto.gameType);
+  }
+
+  @Get('werewolf/:matchId')
+  async werewolfPrivateState(
+    @CurrentUser() user: AuthPayload,
+    @Param('matchId') matchId: string,
+  ) {
+    return this.playService.getWerewolfPrivateState(user.userId, matchId);
   }
 }

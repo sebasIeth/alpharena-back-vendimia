@@ -26,6 +26,8 @@ export interface MatchStartedEvent {
   rpsScores?: { a: number; b: number };
   // UNO-specific
   unoState?: Record<string, unknown>;
+  // Werewolf-specific
+  werewolfState?: Record<string, unknown>;
 }
 
 export interface MatchMoveEvent {
@@ -66,6 +68,14 @@ export interface MatchMoveEvent {
   // UNO-specific
   unoAction?: { type: string; cardId?: string; chosenColor?: string };
   unoPhase?: string;
+  // Werewolf-specific
+  werewolfAction?: { type: string; target?: string; role?: string };
+  werewolfPhase?: string;
+  cycle?: number;
+  activeSide?: string | null;
+  werewolfPlayers?: Record<string, unknown>;
+  discussionLog?: unknown[];
+  deaths?: unknown[];
   currentTurn?: string;
   currentColor?: string;
   topCard?: { id: string; color: string; type: string; value: number | null };
@@ -154,6 +164,18 @@ export interface MatchYourTurnEvent {
   currentTurn?: string;
   drawPileCount?: number;
   handCounts?: Record<string, number>;
+  // Werewolf-specific
+  yourRole?: string;
+  yourDisplayName?: string;
+  knownWerewolves?: string[];
+  seerMemory?: unknown[];
+  werewolfPhase?: string;
+  cycle?: number;
+  activeSide?: string | null;
+  werewolfPlayers?: Record<string, unknown>;
+  discussionLog?: unknown[];
+  deaths?: unknown[];
+  status?: string;
 }
 
 export interface EventBusEvents {
