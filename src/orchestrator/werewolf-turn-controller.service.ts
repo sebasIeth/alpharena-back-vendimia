@@ -332,6 +332,10 @@ export class WerewolfTurnControllerService {
   ): Promise<void> {
     if (!agentId) return;
     try {
+      // Compact public snapshot so replay can reconstruct state at any step
+      // without re-running the engine client-side. Excludes secret fields
+      // (roles, seer memory, night votes) until the match is finished.
+      const spectator = toSpectatorView(state) as Record<string, unknown>;
       await this.moveModel.collection.insertOne({
         matchId: new Types.ObjectId(matchId),
         agentId: new Types.ObjectId(agentId),
@@ -341,6 +345,16 @@ export class WerewolfTurnControllerService {
           werewolfAction: action,
           phase: state.phase,
           cycle: state.cycle,
+          werewolfSnapshot: {
+            players: spectator.players,
+            phase: spectator.phase,
+            cycle: spectator.cycle,
+            activeSide: spectator.activeSide,
+            discussionLog: spectator.discussionLog,
+            deaths: spectator.deaths,
+            status: spectator.status,
+            winner: spectator.winner,
+          },
         },
         boardStateAfter: [],
         scoreAfter: {},
