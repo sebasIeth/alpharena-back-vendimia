@@ -9,7 +9,7 @@ import * as crypto from 'crypto';
 import * as nacl from 'tweetnacl';
 import { User } from '../database/schemas';
 import { ConfigService } from '../common/config/config.service';
-import { generateWalletForChain } from '../common/wallet.util';
+import { generateWalletForChain, walletFormatOf, verifyWalletSignature } from '../common/wallet.util';
 import { MailService } from '../mail/mail.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -121,12 +121,10 @@ export class AuthService {
   }
 
   async registerWithWallet(walletAddress: string, signature: string, nonce: string) {
-    // Validate wallet address
-    let publicKey: PublicKey;
-    try {
-      publicKey = new PublicKey(walletAddress);
-    } catch {
-      throw new BadRequestException('Invalid Solana wallet address');
+    // Validate wallet address (accept either EVM 0x… or Solana base58)
+    const walletChain = walletFormatOf(walletAddress);
+    if (walletChain === 'unknown') {
+      throw new BadRequestException('Invalid wallet address');
     }
 
     // Check if this wallet is already registered
@@ -149,12 +147,10 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired nonce. Call GET /auth/wallet/register-nonce first.');
     }
 
-    // Verify signature against the nonce message
+    // Verify signature against the nonce message (dispatches ECDSA / Ed25519
+    // by address format).
     const message = `Sign this message to register on AlphArena: ${nonce}`;
-    const messageBytes = new TextEncoder().encode(message);
-    const signatureBytes = bs58.default.decode(signature);
-
-    const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
+    const isValid = await verifyWalletSignature(walletAddress, signature, message);
     if (!isValid) {
       throw new BadRequestException('Invalid wallet signature');
     }
@@ -168,13 +164,16 @@ export class AuthService {
       username = `player_${crypto.randomBytes(4).toString('hex')}`;
     }
 
-    // Create user with external wallet as primary, still generate custodial wallet as fallback
-    const custodialKeypair = Keypair.generate();
+    // Generate the custodial wallet on the chain matching the user's
+    // external wallet — a user connecting MetaMask gets an EVM custodial
+    // wallet, one connecting Phantom gets a Solana custodial wallet.
+    const custodialChain = walletChain === 'evm' ? this.configService.chainDefault : 'solana';
+    const custodial = generateWalletForChain(custodialChain);
 
     const user = await this.userModel.create({
       username,
-      walletAddress: custodialKeypair.publicKey.toBase58(),
-      walletPrivateKey: bs58.default.encode(custodialKeypair.secretKey),
+      walletAddress: custodial.walletAddress,
+      walletPrivateKey: custodial.walletPrivateKey,
       externalWalletAddress: walletAddress,
       walletType: 'external',
       emailVerified: false,
@@ -185,13 +184,13 @@ export class AuthService {
     const payload: AuthPayload = { userId: user._id.toString(), username: user.username };
     const token = this.generateToken(payload);
 
-    this.logger.log(`New wallet user registered: ${username} (wallet: ${walletAddress})`);
+    this.logger.log(`New wallet user registered: ${username} (wallet: ${walletAddress}, chain: ${walletChain})`);
 
-    // Create ATAs for both wallets in background
-    this.settlementRouter.ensureTokenAccounts('solana', custodialKeypair.publicKey.toBase58()).catch((err) =>
+    // Create ATAs for both wallets in background (on their respective chains)
+    this.settlementRouter.ensureTokenAccounts(custodial.chain, custodial.walletAddress).catch((err) =>
       this.logger.warn(`Failed to create ATAs for custodial wallet: ${err.message}`),
     );
-    this.settlementRouter.ensureTokenAccounts('solana', walletAddress).catch((err) =>
+    this.settlementRouter.ensureTokenAccounts(custodial.chain, walletAddress).catch((err) =>
       this.logger.warn(`Failed to create ATAs for external wallet ${walletAddress}: ${err.message}`),
     );
 
@@ -244,11 +243,8 @@ export class AuthService {
   }
 
   async loginWithWallet(walletAddress: string, signature: string, nonce: string) {
-    let publicKey: PublicKey;
-    try {
-      publicKey = new PublicKey(walletAddress);
-    } catch {
-      throw new BadRequestException('Invalid Solana wallet address');
+    if (walletFormatOf(walletAddress) === 'unknown') {
+      throw new BadRequestException('Invalid wallet address');
     }
 
     // Find user by external wallet
@@ -267,12 +263,9 @@ export class AuthService {
       throw new BadRequestException('Invalid or expired nonce. Call GET /auth/wallet/login-nonce first.');
     }
 
-    // Verify signature against the nonce message
+    // Verify signature — ECDSA for EVM wallets, Ed25519 for Solana.
     const message = `Sign this message to log in to AlphArena: ${nonce}`;
-    const messageBytes = new TextEncoder().encode(message);
-    const signatureBytes = bs58.default.decode(signature);
-
-    const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
+    const isValid = await verifyWalletSignature(walletAddress, signature, message);
     if (!isValid) {
       throw new UnauthorizedException('Invalid wallet signature');
     }
@@ -409,12 +402,9 @@ export class AuthService {
       throw new BadRequestException('No nonce found. Call GET /auth/wallet/nonce first.');
     }
 
-    // Validate the wallet address is a valid Solana public key
-    let publicKey: PublicKey;
-    try {
-      publicKey = new PublicKey(walletAddress);
-    } catch {
-      throw new BadRequestException('Invalid Solana wallet address');
+    const walletChain = walletFormatOf(walletAddress);
+    if (walletChain === 'unknown') {
+      throw new BadRequestException('Invalid wallet address');
     }
 
     // Check no other user has this external wallet
@@ -423,12 +413,9 @@ export class AuthService {
       throw new ConflictException('This wallet is already connected to another account');
     }
 
-    // Verify Ed25519 signature
+    // Verify signature — ECDSA for EVM, Ed25519 for Solana
     const message = `Sign this message to connect your wallet to AlphArena: ${user.walletNonce}`;
-    const messageBytes = new TextEncoder().encode(message);
-    const signatureBytes = bs58.default.decode(signature);
-
-    const isValid = nacl.sign.detached.verify(messageBytes, signatureBytes, publicKey.toBytes());
+    const isValid = await verifyWalletSignature(walletAddress, signature, message);
     if (!isValid) {
       throw new BadRequestException('Invalid signature');
     }
@@ -438,10 +425,11 @@ export class AuthService {
     user.walletNonce = null;
     await user.save();
 
-    this.logger.log(`Wallet connected for user ${user.username}: ${walletAddress}`);
+    this.logger.log(`Wallet connected for user ${user.username}: ${walletAddress} (${walletChain})`);
 
-    // Ensure ATAs exist for the external wallet (platform pays)
-    this.settlementRouter.ensureTokenAccounts('solana', walletAddress).catch((err) =>
+    // Ensure ATAs exist for the external wallet (platform pays, on its chain)
+    const settlementChain = walletChain === 'evm' ? this.configService.chainDefault : 'solana';
+    this.settlementRouter.ensureTokenAccounts(settlementChain, walletAddress).catch((err) =>
       this.logger.warn(`Failed to create ATAs for external wallet ${walletAddress}: ${err.message}`),
     );
 
@@ -467,13 +455,18 @@ export class AuthService {
     const user = await this.userModel.findById(userId);
     if (!user) throw new BadRequestException('User not found');
 
-    user.externalWalletAddress = null;
-    user.walletType = 'custodial';
-    user.walletNonce = null;
-    await user.save();
+    // Unset the field entirely so the sparse unique index skips this document
+    await this.userModel.updateOne(
+      { _id: userId },
+      {
+        $unset: { externalWalletAddress: '' },
+        $set: { walletType: 'custodial', walletNonce: null },
+      },
+    );
+    const fresh = await this.userModel.findById(userId);
 
     this.logger.log(`External wallet disconnected for user ${user.username}`);
-    return { user: this.sanitizeUser(user) };
+    return { user: this.sanitizeUser(fresh!) };
   }
 
   private generateToken(payload: AuthPayload): string {

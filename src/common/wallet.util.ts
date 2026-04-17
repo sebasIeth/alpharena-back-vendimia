@@ -1,6 +1,8 @@
-import { Keypair } from '@solana/web3.js';
+import { Keypair, PublicKey } from '@solana/web3.js';
+import * as nacl from 'tweetnacl';
 import * as bs58Mod from 'bs58';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { verifyMessage } from 'viem';
 
 const bs58 = (bs58Mod as any).default ?? bs58Mod;
 
@@ -46,4 +48,50 @@ export function walletFormatOf(address: string): 'evm' | 'solana' | 'unknown' {
   if (/^0x[0-9a-fA-F]{40}$/.test(address)) return 'evm';
   if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) return 'solana';
   return 'unknown';
+}
+
+/**
+ * Verify that `signature` is a signature of `message` produced by the
+ * key pair controlling `walletAddress`. Dispatches by address format:
+ *
+ *   - 0x…      → ECDSA over secp256k1 (viem verifyMessage, EIP-191).
+ *                Signature must be a 0x-prefixed hex string (65 bytes).
+ *   - base58   → Ed25519 via @solana/web3.js + tweetnacl. Signature
+ *                must be base58-encoded (as Solana wallets sign).
+ *
+ * Returns false on any decode/verify error instead of throwing, so the
+ * caller can decide the user-facing error message.
+ */
+export async function verifyWalletSignature(
+  walletAddress: string,
+  signature: string,
+  message: string,
+): Promise<boolean> {
+  const fmt = walletFormatOf(walletAddress);
+
+  if (fmt === 'evm') {
+    try {
+      const sig = signature.startsWith('0x') ? signature : `0x${signature}`;
+      return await verifyMessage({
+        address: walletAddress as `0x${string}`,
+        message,
+        signature: sig as `0x${string}`,
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  if (fmt === 'solana') {
+    try {
+      const pubkey = new PublicKey(walletAddress);
+      const messageBytes = new TextEncoder().encode(message);
+      const signatureBytes = bs58.decode(signature);
+      return nacl.sign.detached.verify(messageBytes, signatureBytes, pubkey.toBytes());
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
 }
