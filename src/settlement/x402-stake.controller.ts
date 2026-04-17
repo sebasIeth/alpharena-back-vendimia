@@ -11,7 +11,9 @@ import { CurrentAgent } from '../common/decorators/current-agent.decorator';
 import { AuthPayload } from '../common/types';
 import { X402VerifierService } from './x402-verifier.service';
 import { SolanaSettlementService } from './solana-settlement.service';
+import { SettlementRouterService } from './settlement-router.service';
 import { X402PaymentStore } from './x402-payment-store.service';
+import { ConfigService } from '../common/config/config.service';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Agent } from '../database/schemas';
@@ -24,24 +26,62 @@ export class X402StakeController {
   constructor(
     private readonly x402Verifier: X402VerifierService,
     private readonly solanaSettlement: SolanaSettlementService,
+    private readonly settlementRouter: SettlementRouterService,
     private readonly paymentStore: X402PaymentStore,
     @InjectModel(Agent.name) private readonly agentModel: Model<Agent>,
     private readonly jwtGuard: JwtAuthGuard,
     private readonly apiKeyGuard: ApiKeyAuthGuard,
+    private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * Resolve the chain to use for a given agent. Falls back to the global
+   * default when the agent document doesn't specify one (legacy records).
+   */
+  private chainFor(agent: { chain?: string | null } | null): string {
+    return (agent?.chain as string) || this.configService.chainDefault;
+  }
+
+  /** The human-friendly network label we return in x402 402 responses. */
+  private networkLabel(chain: string): string {
+    if (chain === 'solana') return 'solana';
+    if (chain === 'base' || chain === 'base-sepolia') {
+      return this.configService.baseChainId === 8453 ? 'base' : 'base-sepolia';
+    }
+    return chain;
+  }
+
   @Get('token-info')
-  async tokenInfo(@Query('token') token?: string) {
+  async tokenInfo(
+    @Query('token') token?: string,
+    @Query('chain') chainQuery?: string,
+  ) {
     const t = token || 'USDC';
-    const mint = this.solanaSettlement.getTokenMint(t);
-    const decimals = this.solanaSettlement.getTokenDecimals(t);
-    if (!mint) throw new BadRequestException(`Token ${t} not configured`);
-    return { token: t, tokenMint: mint, decimals };
+    const chain = chainQuery || this.configService.chainDefault;
+    const decimals = this.settlementRouter.getTokenDecimals(chain, t);
+    if (chain === 'solana') {
+      const mint = this.solanaSettlement.getTokenMint(t);
+      if (!mint) throw new BadRequestException(`Token ${t} not configured on Solana`);
+      return { chain, network: this.networkLabel(chain), token: t, tokenMint: mint, decimals };
+    }
+    // EVM
+    if (t !== 'USDC') {
+      throw new BadRequestException(`Token ${t} not supported on EVM yet`);
+    }
+    return {
+      chain,
+      network: this.networkLabel(chain),
+      token: t,
+      tokenAddress: this.configService.baseUsdcAddress,
+      chainId: this.configService.baseChainId,
+      decimals,
+    };
   }
 
   /**
-   * Build a partially-signed stake transaction.
-   * Platform signs as fee payer. User signs with their external wallet.
+   * Build a partially-signed (Solana) or calldata-only (EVM) stake
+   * transaction. On Solana the platform co-signs as fee payer; on EVM
+   * the user's external wallet signs and submits the ERC-20 transfer.
    */
   @Post('build-stake')
   async buildStake(
@@ -62,30 +102,51 @@ export class X402StakeController {
 
     if (!agent.walletAddress) throw new BadRequestException('Agent has no wallet');
 
-    const platformWallet = this.solanaSettlement.getPlatformWalletAddress();
+    const chain = this.chainFor(agent);
+    const platformWallet = this.settlementRouter.getPlatformWalletAddress(chain);
     if (!platformWallet) throw new BadRequestException('Platform wallet not configured');
 
-    // Calculate stake amount
+    // Calculate stake amount (USD-equivalent). ALPHA pricing is Solana-only.
     let stakeAmount = 1;
-    if (matchToken === 'ALPHA') {
+    if (matchToken === 'ALPHA' && chain === 'solana') {
       const alphaPrice = await this.solanaSettlement.getAlphaPriceUsd();
       if (alphaPrice && alphaPrice > 0) {
         stakeAmount = Math.ceil(1 / alphaPrice);
       }
     }
 
-    const tokenDecimals = this.solanaSettlement.getTokenDecimals(matchToken);
+    const tokenDecimals = this.settlementRouter.getTokenDecimals(chain, matchToken);
     const amountAtomic = BigInt(stakeAmount) * BigInt(10 ** tokenDecimals);
 
-    const result = await this.solanaSettlement.buildPartiallySignedTransfer(
-      agent.walletAddress, platformWallet, amountAtomic, matchToken,
+    const result = await this.settlementRouter.buildPartiallySignedTransfer(
+      chain, agent.walletAddress, platformWallet, amountAtomic, matchToken,
     );
 
     if (!result) throw new BadRequestException('Failed to build transaction');
 
+    if (result.chain === 'solana') {
+      return {
+        chain,
+        network: this.networkLabel(chain),
+        transaction: result.transaction,
+        blockhash: result.blockhash,
+        amount: stakeAmount,
+        amountAtomic: Number(amountAtomic),
+        token: matchToken,
+        recipient: platformWallet,
+      };
+    }
+    // EVM: return ERC-20 transfer params for the user's wallet to sign
     return {
-      transaction: result.transaction,
-      blockhash: result.blockhash,
+      chain,
+      network: this.networkLabel(chain),
+      evmTransfer: {
+        contract: result.contract,
+        to: result.to,
+        amount: result.amount,
+        chainId: result.chainId,
+        data: result.data,
+      },
       amount: stakeAmount,
       amountAtomic: Number(amountAtomic),
       token: matchToken,
@@ -123,46 +184,52 @@ export class X402StakeController {
       if (agentAuth._id.toString() !== agentId) throw new BadRequestException('API key does not match this agent');
     }
 
-    const platformWallet = this.solanaSettlement.getPlatformWalletAddress();
-    const tokenMint = this.solanaSettlement.getTokenMint(matchToken);
-    const tokenDecimals = this.solanaSettlement.getTokenDecimals(matchToken);
+    const chain = this.chainFor(agent);
+    const platformWallet = this.settlementRouter.getPlatformWalletAddress(chain);
+    const tokenDecimals = this.settlementRouter.getTokenDecimals(chain, matchToken);
 
-    if (!platformWallet || !tokenMint) {
-      throw new BadRequestException(`${matchToken} payments not configured on this server`);
+    if (!platformWallet) {
+      throw new BadRequestException(`${matchToken} payments not configured on ${chain}`);
     }
 
-    // Calculate stake amount
+    // Calculate stake amount (ALPHA pricing is Solana-only)
     let stakeAmount = 1;
-    if (matchToken === 'ALPHA') {
+    if (matchToken === 'ALPHA' && chain === 'solana') {
       const alphaPrice = await this.solanaSettlement.getAlphaPriceUsd();
       if (alphaPrice && alphaPrice > 0) {
         stakeAmount = Math.ceil(1 / alphaPrice);
       }
     }
 
-    // No payment proof → return 402
+    // No payment proof → return 402 with chain-specific payment requirements
     if (!paymentTx) {
       const amountAtomic = matchToken === 'ALPHA'
         ? BigInt(stakeAmount) * BigInt(10 ** tokenDecimals)
         : stakeAmount * (10 ** tokenDecimals);
-      this.logger.log(`x402: returning payment requirements for agent ${agentId}, amount=${stakeAmount} ${matchToken}`);
+      this.logger.log(`x402: returning payment requirements for agent ${agentId}, amount=${stakeAmount} ${matchToken} on ${chain}`);
+
+      const paymentBase = {
+        token: matchToken,
+        network: this.networkLabel(chain),
+        recipient: platformWallet,
+        amount: Number(amountAtomic),
+        amountHuman: stakeAmount,
+        decimals: tokenDecimals,
+        description: `Stake ${stakeAmount} ${matchToken} for ${gameType} match`,
+      };
+      const paymentInfo =
+        chain === 'solana'
+          ? { ...paymentBase, tokenMint: this.solanaSettlement.getTokenMint(matchToken) }
+          : { ...paymentBase, tokenAddress: this.configService.baseUsdcAddress, chainId: this.configService.baseChainId };
+
       return res.status(HttpStatus.PAYMENT_REQUIRED).json({
         protocol: 'x402',
         version: '1.0',
-        payment: {
-          token: matchToken,
-          tokenMint,
-          network: 'solana',
-          recipient: platformWallet,
-          amount: Number(amountAtomic),
-          amountHuman: stakeAmount,
-          decimals: tokenDecimals,
-          description: `Stake ${stakeAmount} ${matchToken} for ${gameType} match`,
-        },
+        payment: paymentInfo,
         instructions: {
           method: 'POST',
           header: 'X-PAYMENT-TX',
-          description: `Transfer ${matchToken} to the recipient address, then resend this request with the tx signature in the X-PAYMENT-TX header`,
+          description: `Transfer ${matchToken} to the recipient address, then resend this request with the tx ${chain === 'solana' ? 'signature' : 'hash'} in the X-PAYMENT-TX header`,
         },
       });
     }
