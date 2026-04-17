@@ -254,6 +254,27 @@ export class PlayService {
     const me = ww.players[mySide];
     if (!me) throw new NotFoundException('Player not found in state');
 
+    // Public players view (no roles leaked except own + co-wolves)
+    const publicPlayers: Record<string, unknown> = {};
+    for (const [side, p] of Object.entries(ww.players)) {
+      publicPlayers[side] = {
+        side: p.side,
+        displayName: p.displayName,
+        isAlive: p.isAlive,
+        deathCycle: p.deathCycle,
+        deathCause: p.deathCause,
+        // Reveal: own role, co-wolves to wolves, dead players' roles
+        role:
+          side === mySide
+            ? p.role
+            : !p.isAlive
+            ? p.role
+            : me.role === 'WEREWOLF' && p.role === 'WEREWOLF'
+            ? p.role
+            : undefined,
+      };
+    }
+
     const response: Record<string, unknown> = {
       mySide,
       yourRole: me.role,
@@ -261,6 +282,11 @@ export class PlayService {
       phase: ww.phase,
       cycle: ww.cycle,
       activeSide: ww.activeSide,
+      players: publicPlayers,
+      discussionLog: ww.discussionLog,
+      deaths: ww.deaths,
+      status: ww.status,
+      winner: ww.winner,
     };
 
     if (me.role === 'WEREWOLF') {
