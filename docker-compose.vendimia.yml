@@ -1,0 +1,11 @@
+services:
+  api:
+    build: .
+    container_name: alpharena-api-vendimia
+    restart: unless-stopped
+    ports:
+      - "3011:3011"
+    env_file:
+      - .env.prod
+    environment:
+      - PORT=3011
