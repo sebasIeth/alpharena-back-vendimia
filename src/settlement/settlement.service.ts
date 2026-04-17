@@ -393,7 +393,7 @@ export class SettlementService implements OnModuleInit, OnModuleDestroy {
       args: [walletAddress as Address],
     });
 
-    return formatUnits(balance as bigint, 18);
+    return formatUnits(balance as bigint, 6);
   }
 
   /**
@@ -499,6 +499,6 @@ export class SettlementService implements OnModuleInit, OnModuleDestroy {
    * Get the USDC token decimals used by this service.
    */
   getUsdcDecimals(): number {
-    return 18;
+    return 6;
   }
 }
