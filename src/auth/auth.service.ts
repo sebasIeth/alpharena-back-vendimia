@@ -64,15 +64,20 @@ export class AuthService {
     const chain = this.configService.chainDefault;
     const wallet = generateWalletForChain(chain);
 
-    const user = await this.userModel.create({
+    // Only include `email` field when actually provided — setting it
+    // explicitly to null collides with the sparse unique index across
+    // other emailless users.
+    const userDoc: Record<string, unknown> = {
       username,
       passwordHash,
       walletAddress: wallet.walletAddress,
       walletPrivateKey: wallet.walletPrivateKey,
-      email: email ?? null,
       emailVerified: !!email,
       balance: 0,
-    });
+    };
+    if (email) userDoc.email = email;
+
+    const user = await this.userModel.create(userDoc);
 
     // Clean up verification record
     if (email) {

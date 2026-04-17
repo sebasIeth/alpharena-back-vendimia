@@ -37,8 +37,12 @@ export class User extends Document {
   @Prop({ default: false })
   emailVerified: boolean;
 
-  @Prop({ type: String, default: null, unique: true, sparse: true })
-  externalWalletAddress: string | null;
+  // NOTE: no `default: null` — sparse unique indexes in MongoDB treat
+  // documents with field=null as indexed (collision), while documents
+  // without the field are skipped. Let Mongoose omit this field when
+  // undefined.
+  @Prop({ type: String, required: false, unique: true, sparse: true })
+  externalWalletAddress?: string;
 
   @Prop({ type: String, default: 'custodial', enum: ['custodial', 'external'] })
   walletType: string;
