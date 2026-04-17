@@ -52,16 +52,17 @@ function deterministicPick(seed: string, tag: string, tied: string[]): string {
 
 // ── Initial State ───────────────────────────────────────────────────────────
 
-export function createInitialState(seed?: string): WerewolfGameState {
+export function createInitialState(seed?: string, names?: string[]): WerewolfGameState {
   const rngSeed = seed ?? randomUUID();
   const sides = getSides(WEREWOLF_PLAYER_COUNT);
   const shuffledRoles = seededShuffle(ROLE_DISTRIBUTION, rngSeed);
 
   const players: Record<string, WerewolfPlayerState> = {};
   sides.forEach((side, i) => {
+    const name = (names?.[i] && names[i].trim()) || `Player${i + 1}`;
     players[side] = {
       side,
-      displayName: `Player${i + 1}`,
+      displayName: name,
       role: shuffledRoles[i],
       isAlive: true,
       deathCycle: null,

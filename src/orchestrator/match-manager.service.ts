@@ -534,7 +534,10 @@ export class MatchManagerService {
     potAmount: number,
     existingMatchId?: string,
   ): Promise<string> {
-    const werewolfState = createWerewolfInitialState();
+    const werewolfState = createWerewolfInitialState(
+      undefined,
+      agents.map((a) => a.name),
+    );
 
     const matchAgents: Record<string, { agentId: string; userId: string; name: string; eloAtStart: number }> = {};
     const timeouts: Record<string, number> = {};
