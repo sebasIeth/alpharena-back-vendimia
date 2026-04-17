@@ -1,6 +1,22 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { encodeFunctionData, parseAbi } from 'viem';
 import { SettlementService } from './settlement.service';
 import { SolanaSettlementService } from './solana-settlement.service';
+import { ConfigService } from '../common/config/config.service';
+
+export type BuildTransferResult =
+  | { chain: 'solana'; transaction: string; blockhash: string }
+  | {
+      chain: 'evm';
+      // Parameters the frontend needs to ask the wallet to sign an
+      // ERC-20 `transfer(to, amount)` on behalf of the sender. The
+      // backend does NOT sign — the user's external wallet does.
+      contract: string; // USDC ERC-20 address
+      to: string;
+      amount: string; // atomic, decimal string
+      chainId: number;
+      data: `0x${string}`; // pre-encoded calldata
+    };
 
 /**
  * Chain-agnostic facade that routes settlement operations to the
@@ -15,6 +31,7 @@ export class SettlementRouterService {
   constructor(
     private readonly evmSettlement: SettlementService,
     private readonly solanaSettlement: SolanaSettlementService,
+    private readonly configService: ConfigService,
   ) {}
 
   getTokenDecimals(chain: string, token: string = 'USDC'): number {
@@ -155,10 +172,32 @@ export class SettlementRouterService {
     to: string,
     amount: bigint,
     token: string = 'USDC',
-  ): Promise<{ transaction: string; blockhash: string } | null> {
+  ): Promise<BuildTransferResult | null> {
     if (chain === 'solana') {
-      return this.solanaSettlement.buildPartiallySignedTransfer(senderAddress, to, amount, token);
+      const sol = await this.solanaSettlement.buildPartiallySignedTransfer(senderAddress, to, amount, token);
+      if (!sol) return null;
+      return { chain: 'solana', transaction: sol.transaction, blockhash: sol.blockhash };
     }
-    return null;
+    // EVM path — produce ERC-20 transfer calldata. The user's external
+    // wallet (MetaMask / WalletConnect / Coinbase) signs and submits it.
+    if (token !== 'USDC') {
+      this.logger.warn(`EVM buildPartiallySignedTransfer: only USDC supported on Base (got ${token})`);
+      return null;
+    }
+    const contract = this.configService.baseUsdcAddress;
+    const chainId = this.configService.baseChainId;
+    const data = encodeFunctionData({
+      abi: parseAbi(['function transfer(address to, uint256 amount)']),
+      functionName: 'transfer',
+      args: [to as `0x${string}`, amount],
+    });
+    return {
+      chain: 'evm',
+      contract,
+      to,
+      amount: amount.toString(),
+      chainId,
+      data,
+    };
   }
 }

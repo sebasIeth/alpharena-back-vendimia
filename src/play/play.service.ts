@@ -472,8 +472,24 @@ export class PlayService {
     }
 
     this.withdrawCooldowns.set(userId, Date.now());
-    this.logger.log(`Built withdraw tx: user=${userId}, amount=${amount} ${token}, to=${to}`);
-    return { transaction: result.transaction, blockhash: result.blockhash, amount, to, token, chain };
+    this.logger.log(`Built withdraw tx: user=${userId}, amount=${amount} ${token}, to=${to}, chain=${chain}`);
+    if (result.chain === 'solana') {
+      return { chain, amount, to, token, transaction: result.transaction, blockhash: result.blockhash };
+    }
+    // EVM: frontend signs + submits via external wallet
+    return {
+      chain,
+      amount,
+      to,
+      token,
+      evmTransfer: {
+        contract: result.contract,
+        to: result.to,
+        amount: result.amount,
+        chainId: result.chainId,
+        data: result.data,
+      },
+    };
   }
 
   /**
