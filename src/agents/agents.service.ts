@@ -8,8 +8,8 @@ import { DEFAULT_ELO } from '../common/constants/game.constants';
 import { OpenClawWsService } from '../openclaw-ws';
 import { MatchmakingService } from '../matchmaking/matchmaking.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
-import { Keypair } from '@solana/web3.js';
-import * as bs58 from 'bs58';
+import { ConfigService } from '../common/config/config.service';
+import { generateWalletForChain } from '../common/wallet.util';
 
 @Injectable()
 export class AgentsService {
@@ -21,6 +21,7 @@ export class AgentsService {
     private readonly openclawWs: OpenClawWsService,
     @Inject(forwardRef(() => MatchmakingService)) private readonly matchmakingService: MatchmakingService,
     private readonly settlementRouter: SettlementRouterService,
+    private readonly configService: ConfigService,
   ) {}
 
   async create(userId: string, dto: CreateAgentDto) {
@@ -56,20 +57,25 @@ export class AgentsService {
       agentData.openclawToken = dto.openclawToken;
       agentData.openclawAgentId = dto.openclawAgentId || 'main';
 
-      // Generate a dedicated Solana wallet for this agent
-      const keypair = Keypair.generate();
-      agentData.walletAddress = keypair.publicKey.toBase58();
-      agentData.walletPrivateKey = bs58.default.encode(keypair.secretKey);
+      // Generate a dedicated wallet for this agent on the target chain
+      const chain = dto.chain || this.configService.chainDefault;
+      const wallet = generateWalletForChain(chain);
+      agentData.walletAddress = wallet.walletAddress;
+      agentData.walletPrivateKey = wallet.walletPrivateKey;
+      agentData.chain = wallet.chain;
     } else {
       agentData.endpointUrl = dto.endpointUrl;
 
-      // Generate a dedicated Solana wallet for this agent
-      const keypair = Keypair.generate();
-      agentData.walletAddress = keypair.publicKey.toBase58();
-      agentData.walletPrivateKey = bs58.default.encode(keypair.secretKey);
+      // Generate a dedicated wallet for this agent on the target chain
+      const chain = dto.chain || this.configService.chainDefault;
+      const wallet = generateWalletForChain(chain);
+      agentData.walletAddress = wallet.walletAddress;
+      agentData.walletPrivateKey = wallet.walletPrivateKey;
+      agentData.chain = wallet.chain;
     }
-
-    agentData.chain = dto.chain || 'solana';
+    if (!agentData.chain) {
+      agentData.chain = dto.chain || this.configService.chainDefault;
+    }
 
     const agent = await this.agentModel.create(agentData);
 
@@ -77,7 +83,7 @@ export class AgentsService {
 
     // Create token accounts in background if agent has its own wallet
     if (agentType !== 'human' && agentData.walletAddress) {
-      this.settlementRouter.ensureTokenAccounts(agentData.chain as string || 'solana', agentData.walletAddress as string).catch((err) =>
+      this.settlementRouter.ensureTokenAccounts(agentData.chain as string, agentData.walletAddress as string).catch((err) =>
         this.logger.warn(`Failed to create ATAs for agent ${dto.name}: ${err.message}`),
       );
     }

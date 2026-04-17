@@ -9,6 +9,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthPayload } from '../common/types';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
+import { ConfigService } from '../common/config/config.service';
 import { Agent, User } from '../database/schemas';
 import { decrypt } from '../common/crypto.util';
 
@@ -60,6 +61,7 @@ export class AgentsController {
     private readonly settlementRouter: SettlementRouterService,
     @InjectModel(Agent.name) private readonly agentModel: Model<Agent>,
     @InjectModel(User.name) private readonly userModel: Model<User>,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('test-connection')
@@ -120,7 +122,7 @@ export class AgentsController {
     if (agent.userId && agent.userId.toString() !== user.userId) throw new ForbiddenException('You do not own this agent');
     if (!agent.walletAddress) throw new BadRequestException('Agent does not have a wallet');
 
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || this.configService.chainDefault;
     const [alpha, usdc, sol] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA'),
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC'),
@@ -144,7 +146,7 @@ export class AgentsController {
     const destination = dto.toAddress || (await this.userModel.findById(user.userId))?.walletAddress;
     if (!destination) throw new BadRequestException('No destination address provided');
 
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || this.configService.chainDefault;
     const token = dto.token || 'USDC';
 
     if (token === 'USDC' && dto.amount < 10) {

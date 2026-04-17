@@ -10,6 +10,7 @@ import { IsString, MinLength, IsNumber, Min, Max, IsIn, IsOptional } from 'class
 import { MIN_STAKE, MAX_STAKE } from '../common/constants/game.constants';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
+import { ConfigService } from '../common/config/config.service';
 
 class JoinQueueDto {
   @IsString() @MinLength(1) agentId: string;
@@ -32,6 +33,7 @@ export class MatchmakingController {
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly settlementRouter: SettlementRouterService,
     private readonly x402PaymentStore: X402PaymentStore,
+    private readonly configService: ConfigService,
   ) {}
 
   @Post('join')
@@ -45,7 +47,7 @@ export class MatchmakingController {
 
     // Verify agent wallet has on-chain balance
     const matchToken = dto.token || 'USDC';
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || this.configService.chainDefault;
 
     // Auto-calculate stake: $1 USD equivalent
     let stakeAmount = dto.stakeAmount ?? 1;

@@ -8,6 +8,8 @@ import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 import { MatchManagerService } from '../orchestrator/match-manager.service';
+import { ConfigService } from '../common/config/config.service';
+import { generateWalletForChain } from '../common/wallet.util';
 import { DEFAULT_ELO } from '../common/constants/game.constants';
 
 @Injectable()
@@ -26,6 +28,7 @@ export class PlayService {
     private readonly humanMoveService: HumanMoveService,
     private readonly orchestratorService: OrchestratorService,
     private readonly matchManager: MatchManagerService,
+    private readonly configService: ConfigService,
   ) {}
 
   async joinQueue(userId: string, gameType?: string, stakeAmountInput?: number, token?: string) {
@@ -56,7 +59,7 @@ export class PlayService {
 
     // Auto-calculate stake: $1 USD equivalent
     const matchToken = token || 'USDC';
-    const chain = agent.chain || 'solana';
+    const chain = agent.chain || this.configService.chainDefault;
     let stakeAmount = stakeAmountInput ?? 1;
     if (matchToken === 'ALPHA') {
       const alphaPrice = await this.settlementRouter.getAlphaPriceUsd();
@@ -215,7 +218,7 @@ export class PlayService {
       throw new NotFoundException('User wallet not found');
     }
 
-    const chain = 'solana';
+    const chain = this.configService.chainDefault;
     const [alpha, usdc, sol] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, activeWallet, 'ALPHA'),
       this.settlementRouter.getAgentTokenBalance(chain, activeWallet, 'USDC'),
@@ -372,7 +375,7 @@ export class PlayService {
       stats: { wins: 0, losses: 0, draws: 0, totalMatches: 0, winRate: 0, totalEarnings: 0 },
       walletAddress,
       walletPrivateKey: isExternal ? null : user.walletPrivateKey,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
     });
 
     this.logger.log(`Created human agent "${user.username}" (${user.walletType}) for user ${userId}`);
@@ -416,7 +419,7 @@ export class PlayService {
       throw new BadRequestException('Minimum USDC withdrawal is 10 USDC.');
     }
 
-    const chain = 'solana';
+    const chain = this.configService.chainDefault;
     const balanceStr = await this.settlementRouter.getAgentTokenBalance(chain, user.walletAddress, token);
     const balance = parseFloat(balanceStr);
     if (balance < amount) {
@@ -450,7 +453,7 @@ export class PlayService {
       throw new BadRequestException('SOL withdrawals coming soon. Use ALPHA or USDC.');
     }
 
-    const chain = 'solana';
+    const chain = this.configService.chainDefault;
     const balanceStr = await this.settlementRouter.getAgentTokenBalance(chain, user.externalWalletAddress, token);
     const balance = parseFloat(balanceStr);
     if (balance < amount) {
@@ -491,7 +494,7 @@ export class PlayService {
       endpointUrl: agent.endpointUrl || '',
       eloRating: agent.eloRating || DEFAULT_ELO,
       type: 'human',
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       token: 'USDC',
     };
 
@@ -505,7 +508,7 @@ export class PlayService {
         endpointUrl: b.endpointUrl || 'internal://random-bot',
         eloRating: b.eloRating || DEFAULT_ELO,
         type: 'http',
-        chain: 'solana',
+        chain: this.configService.chainDefault,
         token: 'USDC',
       }));
       const matchId = await this.orchestratorService.startMatchMulti(
@@ -526,7 +529,7 @@ export class PlayService {
       endpointUrl: botAgent.endpointUrl || 'internal://random-bot',
       eloRating: botAgent.eloRating || DEFAULT_ELO,
       type: 'http',
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       token: 'USDC',
     };
 
@@ -547,7 +550,7 @@ export class PlayService {
         eloRating: DEFAULT_ELO,
         elo: DEFAULT_ELO,
         status: 'idle',
-        chain: 'solana',
+        chain: this.configService.chainDefault,
         walletAddress: '',
       });
     }
@@ -573,7 +576,7 @@ export class PlayService {
           eloRating: DEFAULT_ELO,
           elo: DEFAULT_ELO,
           status: 'idle',
-          chain: 'solana',
+          chain: this.configService.chainDefault,
           walletAddress: '',
         });
       }

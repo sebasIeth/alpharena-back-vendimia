@@ -8,6 +8,7 @@ import { ActiveMatchesService, ActiveMatchState } from './active-matches.service
 import { EventBusService } from './event-bus.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
 import { ReferralsService } from '../referrals/referrals.service';
+import { ConfigService } from '../common/config/config.service';
 
 const ELO_K = 32;
 
@@ -45,6 +46,7 @@ export class ResultHandlerService {
     private readonly eventBus: EventBusService,
     private readonly settlementRouter: SettlementRouterService,
     private readonly referralsService: ReferralsService,
+    private readonly configService: ConfigService,
   ) {}
 
   async handleMatchEnd(
@@ -80,7 +82,7 @@ export class ResultHandlerService {
       eloOutcome,
     );
 
-    const matchChain = matchDoc.chain || 'solana';
+    const matchChain = matchDoc.chain || this.configService.chainDefault;
     const matchToken = matchDoc.token || 'USDC';
     const tokenDecimals = this.settlementRouter.getTokenDecimals(matchChain, matchToken);
 

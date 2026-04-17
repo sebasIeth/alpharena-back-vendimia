@@ -10,6 +10,7 @@ import { CurrentUser } from '../common/decorators/current-user.decorator';
 import { AuthPayload } from '../common/types';
 import { User } from '../database/schemas';
 import { SolanaSettlementService } from '../settlement/solana-settlement.service';
+import { ConfigService } from '../common/config/config.service';
 
 class PlaceBetDto {
   @IsString() matchId: string;
@@ -32,12 +33,13 @@ export class BettingController {
     private readonly service: BettingService,
     @InjectModel(User.name) private readonly userModel: Model<User>,
     private readonly solanaSettlement: SolanaSettlementService,
+    private readonly configService: ConfigService,
   ) {}
 
   /** Public — get betting contract addresses (stub) */
   @Get('contracts')
   getContracts() {
-    return { chain: 'solana', token: 'USDC' };
+    return { chain: this.configService.chainDefault, token: 'USDC' };
   }
 
   /** Public — get full betting info for a match */

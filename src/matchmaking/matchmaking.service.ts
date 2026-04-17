@@ -10,6 +10,7 @@ import { EventBusService } from '../orchestrator/event-bus.service';
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
 import { ActiveMatchesService } from '../orchestrator/active-matches.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
+import { ConfigService } from '../common/config/config.service';
 
 @Injectable()
 export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
@@ -35,6 +36,7 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
     private readonly x402PaymentStore: X402PaymentStore,
     private readonly activeMatches: ActiveMatchesService,
     private readonly settlementRouter: SettlementRouterService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -46,7 +48,7 @@ export class MatchmakingService implements OnModuleInit, OnModuleDestroy {
       const agent = await this.agentModel.findById(entry.agentId);
       if (!agent?.walletAddress || !entry.stakeAmount || entry.stakeAmount <= 0) return;
 
-      const chain = agent.chain || 'solana';
+      const chain = agent.chain || this.configService.chainDefault;
       const token = entry.token || 'USDC';
       const decimals = this.settlementRouter.getTokenDecimals(chain, token);
       const amountAtomic = BigInt(Math.round(entry.stakeAmount * 10 ** decimals));

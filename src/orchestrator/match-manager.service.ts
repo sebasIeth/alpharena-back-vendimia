@@ -38,6 +38,7 @@ import { createInitialState as createPokerInitialState, isMatchOver as isPokerMa
 import { ResultHandlerService } from './result-handler.service';
 import { EventBusService } from './event-bus.service';
 import { SettlementRouterService } from '../settlement/settlement-router.service';
+import { ConfigService } from '../common/config/config.service';
 import { MatchClock } from './match-clock';
 
 export interface MatchAgentInput {
@@ -87,6 +88,7 @@ export class MatchManagerService {
     private readonly eventBus: EventBusService,
     private readonly settlementRouter: SettlementRouterService,
     private readonly gameEngine: GameEngineService,
+    private readonly configService: ConfigService,
   ) {}
 
   getChessMoveHistory(matchId: string): ChessUciMove[] | undefined {
@@ -197,7 +199,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType,
-      chain: agentA.chain || 'solana',
+      chain: agentA.chain || this.configService.chainDefault,
       token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
@@ -264,7 +266,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'marrakech',
-      chain: agentA.chain || 'solana',
+      chain: agentA.chain || this.configService.chainDefault,
       token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
@@ -334,7 +336,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'chess',
-      chain: agentA.chain || 'solana',
+      chain: agentA.chain || this.configService.chainDefault,
       token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
@@ -401,7 +403,7 @@ export class MatchManagerService {
   ): Promise<string> {
     const rpsState = createRpsInitialState();
     const matchData = {
-      gameType: 'rps', chain: agentA.chain || 'solana', token: agentA.token || 'USDC',
+      gameType: 'rps', chain: agentA.chain || this.configService.chainDefault, token: agentA.token || 'USDC',
       agents: {
         a: { agentId: agentA.agentId, userId: agentA.userId, name: agentA.name, eloAtStart: agentA.eloRating },
         b: { agentId: agentB.agentId, userId: agentB.userId, name: agentB.name, eloAtStart: agentB.eloRating },
@@ -478,7 +480,7 @@ export class MatchManagerService {
     }
 
     const matchData = {
-      gameType: 'uno', chain: agents[0].chain || 'solana', token: agents[0].token || 'USDC',
+      gameType: 'uno', chain: agents[0].chain || this.configService.chainDefault, token: agents[0].token || 'USDC',
       agents: matchAgents,
       stakeAmount, potAmount, status: 'starting',
       currentBoard: [], currentTurn: unoState.currentTurn, moveCount: 0,
@@ -568,7 +570,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'werewolf',
-      chain: agents[0].chain || 'solana',
+      chain: agents[0].chain || this.configService.chainDefault,
       token: agents[0].token || 'USDC',
       agents: matchAgents,
       stakeAmount,
@@ -660,7 +662,7 @@ export class MatchManagerService {
 
     const matchData = {
       gameType: 'poker',
-      chain: agents[0].chain || 'solana',
+      chain: agents[0].chain || this.configService.chainDefault,
       token: agents[0].token || 'USDC',
       agents: matchAgents,
       stakeAmount, potAmount, status: 'starting',
@@ -770,7 +772,7 @@ export class MatchManagerService {
 
     // Transfer stake from each agent wallet to platform, then escrow
     // Skip on-chain settlement for zero-stake matches
-    const matchChain = matchDoc.chain || 'solana';
+    const matchChain = matchDoc.chain || this.configService.chainDefault;
     const matchToken = matchDoc.token || 'USDC';
     if (matchDoc.stakeAmount > 0) {
       const tokenDecimals = this.settlementRouter.getTokenDecimals(matchChain, matchToken);
@@ -1415,7 +1417,8 @@ export class MatchManagerService {
       await this.matchModel.updateOne({ _id: matchId }, { status: 'error', endedAt: new Date() });
       const erroredMatch = await this.matchModel.findById(matchId).lean();
       if (erroredMatch?.txHashes?.escrow) {
-        try { await this.settlementRouter.refund('solana', matchId); } catch {}
+        const refundChain = erroredMatch.chain || this.configService.chainDefault;
+        try { await this.settlementRouter.refund(refundChain, matchId); } catch {}
       }
       if (matchState) {
         await Promise.all(
@@ -1450,7 +1453,8 @@ export class MatchManagerService {
           .map((a) => this.agentModel.updateOne({ _id: a.agentId, status: 'in_match' }, { status: 'idle' })),
       );
       if (match.txHashes?.escrow) {
-        try { await this.settlementRouter.refund('solana', matchId); } catch {}
+        const refundChain = match.chain || this.configService.chainDefault;
+        try { await this.settlementRouter.refund(refundChain, matchId); } catch {}
       } else {
         this.logger.log(`Skipping refund for match ${matchId} — no escrow was deposited`);
       }
@@ -1475,7 +1479,8 @@ export class MatchManagerService {
           this.logger.error(`Cannot recover match ${matchId}: agent doc(s) missing`);
           await this.matchModel.updateOne({ _id: matchId }, { status: 'error', endedAt: new Date() });
           if (match.txHashes?.escrow) {
-            try { await this.settlementRouter.refund('solana', matchId); } catch {}
+            const refundChain = match.chain || this.configService.chainDefault;
+            try { await this.settlementRouter.refund(refundChain, matchId); } catch {}
           }
           await Promise.all([
             this.agentModel.updateOne({ _id: match.agents.a.agentId }, { status: 'idle' }),
@@ -1716,7 +1721,8 @@ export class MatchManagerService {
         this.logger.error(`Failed to recover match ${matchId}: ${message}`);
         await this.matchModel.updateOne({ _id: matchId }, { status: 'error', endedAt: new Date() });
         if (match.txHashes?.escrow) {
-          try { await this.settlementRouter.refund('solana', matchId); } catch {}
+          const refundChain = match.chain || this.configService.chainDefault;
+          try { await this.settlementRouter.refund(refundChain, matchId); } catch {}
         }
         await Promise.all([
           this.agentModel.updateOne({ _id: match.agents.a.agentId }, { status: 'idle' }),

@@ -13,6 +13,7 @@ import { EventBusService } from '../orchestrator/event-bus.service';
 import { SolanaSettlementService } from '../settlement/solana-settlement.service';
 import { X402VerifierService } from '../settlement/x402-verifier.service';
 import { X402PaymentStore } from '../settlement/x402-payment-store.service';
+import { ConfigService } from '../common/config/config.service';
 import { MatchEndedEvent } from '../common/types';
 
 const BETTING_FEE_PERCENT = 5;
@@ -58,6 +59,7 @@ export class BettingService implements OnModuleInit {
     private readonly solanaSettlement: SolanaSettlementService,
     private readonly x402Verifier: X402VerifierService,
     private readonly x402PaymentStore: X402PaymentStore,
+    private readonly configService: ConfigService,
   ) {}
 
   onModuleInit() {
@@ -156,7 +158,7 @@ export class BettingService implements OnModuleInit {
       onAgentA,
       amount,
       txHash: betTxHash,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       token: 'USDC',
     });
 
@@ -167,7 +169,7 @@ export class BettingService implements OnModuleInit {
       matchId,
       onAgentId,
       amount,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       token: 'USDC',
     };
   }
@@ -200,7 +202,7 @@ export class BettingService implements OnModuleInit {
 
     return {
       matchId,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       gameType: match.gameType,
       status: match.status,
       stakeAmount: match.stakeAmount,
@@ -247,7 +249,7 @@ export class BettingService implements OnModuleInit {
 
     return {
       matchId,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       status: match.status,
       bettingOpen: isOpen,
       pool: {
@@ -318,7 +320,7 @@ export class BettingService implements OnModuleInit {
 
     return {
       matchId,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
       walletAddress: (isExt ? user?.externalWalletAddress : user?.walletAddress) || '',
       bets: {
         byAgent: betsByAgent,
@@ -435,7 +437,7 @@ export class BettingService implements OnModuleInit {
     return {
       txHash: txHash || `claim-${matchId}-${userId}`,
       matchId,
-      chain: 'solana',
+      chain: this.configService.chainDefault,
     };
   }
 
@@ -500,7 +502,7 @@ export class BettingService implements OnModuleInit {
 
       claims.push({
         matchId: mId,
-        chain: 'solana',
+        chain: this.configService.chainDefault,
         gameType: match.gameType,
         outcome,
         betsByAgent,

@@ -9,6 +9,7 @@ import * as crypto from 'crypto';
 import * as nacl from 'tweetnacl';
 import { User } from '../database/schemas';
 import { ConfigService } from '../common/config/config.service';
+import { generateWalletForChain } from '../common/wallet.util';
 import { MailService } from '../mail/mail.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -59,14 +60,15 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
-    // Auto-generate Solana wallet for the user
-    const keypair = Keypair.generate();
+    // Auto-generate a custodial wallet on the default chain (Base by default)
+    const chain = this.configService.chainDefault;
+    const wallet = generateWalletForChain(chain);
 
     const user = await this.userModel.create({
       username,
       passwordHash,
-      walletAddress: keypair.publicKey.toBase58(),
-      walletPrivateKey: bs58.default.encode(keypair.secretKey),
+      walletAddress: wallet.walletAddress,
+      walletPrivateKey: wallet.walletPrivateKey,
       email: email ?? null,
       emailVerified: !!email,
       balance: 0,
@@ -80,10 +82,10 @@ export class AuthService {
     const payload: AuthPayload = { userId: user._id.toString(), username: user.username };
     const token = this.generateToken(payload);
 
-    this.logger.log(`New user registered: ${username}`);
+    this.logger.log(`New user registered: ${username} (chain=${wallet.chain})`);
 
     // Create token accounts in background (don't block registration)
-    this.settlementRouter.ensureTokenAccounts('solana', keypair.publicKey.toBase58()).catch((err) =>
+    this.settlementRouter.ensureTokenAccounts(wallet.chain, wallet.walletAddress).catch((err) =>
       this.logger.warn(`Failed to create ATAs for user ${username}: ${err.message}`),
     );
 
