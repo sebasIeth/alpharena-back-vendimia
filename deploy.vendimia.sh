@@ -4,8 +4,8 @@ set -e
 # ── Config ─────────────────────────────────────────────────────────────────
 # Deploy the Base-migrated backend on a DIFFERENT port/path from the legacy
 # Solana one so both can coexist on the VPS during the transition.
-VPS_HOST=$(grep '^VPS_HOST=' .env.prod | cut -d'=' -f2-)
-VPS_PASSWORD=$(grep '^VPS_PASSWORD=' .env.prod | cut -d'=' -f2-)
+VPS_HOST=$(grep '^VPS_HOST=' .env.prod.vendimia | cut -d'=' -f2-)
+VPS_PASSWORD=$(grep '^VPS_PASSWORD=' .env.prod.vendimia | cut -d'=' -f2-)
 
 if [ -z "$VPS_HOST" ] || [ -z "$VPS_PASSWORD" ]; then
   echo "Error: VPS_HOST or VPS_PASSWORD not found in .env.prod"

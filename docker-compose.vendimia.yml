@@ -6,6 +6,6 @@ services:
     ports:
       - "3011:3011"
     env_file:
-      - .env.prod
+      - .env.prod.vendimia
     environment:
       - PORT=3011
