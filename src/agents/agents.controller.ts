@@ -123,13 +123,19 @@ export class AgentsController {
     if (!agent.walletAddress) throw new BadRequestException('Agent does not have a wallet');
 
     const chain = agent.chain || this.configService.chainDefault;
-    const [alpha, usdc, sol] = await Promise.all([
-      this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'ALPHA'),
+    const [usdc, native] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, agent.walletAddress, 'USDC'),
       this.settlementRouter.getAgentNativeBalance(chain, agent.walletAddress),
     ]);
 
-    return { walletAddress: agent.walletAddress, alpha, usdc, sol, chain };
+    const isSolana = chain === 'solana';
+    return {
+      walletAddress: agent.walletAddress,
+      chain,
+      usdc,
+      eth: isSolana ? '0' : native,
+      sol: isSolana ? native : '0',
+    };
   }
 
   @Post(':id/withdraw')

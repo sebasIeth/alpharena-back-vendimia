@@ -219,18 +219,19 @@ export class PlayService {
     }
 
     const chain = this.configService.chainDefault;
-    const [alpha, usdc, sol] = await Promise.all([
-      this.settlementRouter.getAgentTokenBalance(chain, activeWallet, 'ALPHA'),
+    const [usdc, native] = await Promise.all([
       this.settlementRouter.getAgentTokenBalance(chain, activeWallet, 'USDC'),
       this.settlementRouter.getAgentNativeBalance(chain, activeWallet),
     ]);
 
+    const isSolana = chain === 'solana';
     return {
       walletAddress: activeWallet,
       walletType: user.walletType ?? 'custodial',
-      alpha,
+      chain,
       usdc,
-      sol,
+      eth: isSolana ? '0' : native,
+      sol: isSolana ? native : '0',
     };
   }
 
