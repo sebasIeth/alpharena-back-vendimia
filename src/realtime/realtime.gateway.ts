@@ -15,6 +15,7 @@ import { Model } from 'mongoose';
 import { ConfigService } from '../common/config/config.service';
 import { RoomsService } from './rooms.service';
 import { HumanMoveService } from '../orchestrator/human-move.service';
+import { MatchManagerService } from '../orchestrator/match-manager.service';
 import { Agent, Match } from '../database/schemas';
 
 interface AuthenticatedSocket extends Socket {
@@ -36,6 +37,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     private readonly configService: ConfigService,
     private readonly rooms: RoomsService,
     private readonly humanMoveService: HumanMoveService,
+    private readonly matchManager: MatchManagerService,
     @InjectModel(Agent.name) private readonly agentModel: Model<Agent>,
     @InjectModel(Match.name) private readonly matchModel: Model<Match>,
   ) {}
@@ -224,7 +226,7 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!user) return;
 
     // Check if this user owns the agent that needs to move
-    this.matchModel.findById(matchId).select('agents gameType currentTurn pokerState').lean().then(async (match) => {
+    this.matchModel.findById(matchId).select('agents gameType currentTurn pokerState werewolfState').lean().then(async (match) => {
       if (!match) return;
       const agentDoc = match.agents?.[pendingSide];
       if (!agentDoc) return;
@@ -232,10 +234,11 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       // Verify this user owns the agent whose turn it is
       if (agentDoc.userId?.toString() !== user.userId) return;
 
-      this.logger.log(`Re-sending match:your_turn to reconnected player (match=${matchId}, side=${pendingSide})`);
+      this.logger.log(`Re-sending match:your_turn to reconnected player (match=${matchId}, side=${pendingSide}, gameType=${match.gameType})`);
       const payload: Record<string, unknown> = {
         matchId,
         side: pendingSide,
+        gameType: match.gameType,
         currentTurn: pendingSide,
         turnTimeoutMs: 20000,
       };
@@ -260,6 +263,51 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
           if (pk.players.a?.stack != null && pk.players.b?.stack != null) {
             payload.pokerPlayerStacks = { a: pk.players.a.stack, b: pk.players.b.stack };
           }
+        }
+      }
+
+      // Add werewolf state: private role + legal actions so the human UI
+      // can render its action panel when reconnecting mid-match.
+      if (match.gameType === 'werewolf') {
+        const mm = this.matchManager as unknown as {
+          getWerewolfState?: (id: string) => unknown;
+        };
+        const live = mm.getWerewolfState?.(matchId) as any;
+        if (live && live.players?.[pendingSide]) {
+          const me = live.players[pendingSide];
+          payload.yourRole = me.role;
+          payload.yourDisplayName = me.displayName;
+          payload.werewolfPhase = live.phase;
+          payload.cycle = live.cycle;
+          payload.activeSide = live.activeSide;
+          payload.discussionLog = live.discussionLog;
+          payload.deaths = live.deaths;
+          if (me.role === 'WEREWOLF') {
+            payload.knownWerewolves = Object.values(live.players as Record<string, { side: string; role: string }>)
+              .filter((p) => p.role === 'WEREWOLF' && p.side !== pendingSide)
+              .map((p) => p.side);
+          }
+          if (me.role === 'SEER') {
+            payload.seerMemory = live.seerMemory;
+          }
+          // Legal actions for current state
+          try {
+            const engine = await import('../game-engine/werewolf');
+            payload.legalActions = engine.getLegalActions(live, pendingSide);
+          } catch {}
+          // Public players view (no roles revealed)
+          payload.werewolfPlayers = Object.fromEntries(
+            Object.entries(live.players as Record<string, any>).map(([side, p]) => [
+              side,
+              {
+                side: p.side,
+                displayName: p.displayName,
+                isAlive: p.isAlive,
+                deathCycle: p.deathCycle,
+                deathCause: p.deathCause,
+              },
+            ]),
+          );
         }
       }
 
